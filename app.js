@@ -176,13 +176,13 @@ async function load(quiet) {
     const { rows, source } = await fetchRows();
     state.model = buildModel(rows, source);
     state.updated = new Date(); state.error = null; state.offline = false;
-    store.set('mp_cache', { rows, source, at: state.updated.toISOString() });
+    if (source !== 'demo') store.set('mp_cache', { rows, source, at: state.updated.toISOString() });
   } catch (e) {
     console.warn(e);
     state.error = e.message || String(e);
     if (!state.model) {
       const cache = store.get('mp_cache', null);
-      if (cache) { try { state.model = buildModel(cache.rows, cache.source); state.updated = new Date(cache.at); state.offline = true; } catch {} }
+      if (cache && cache.source !== 'demo') { try { state.model = buildModel(cache.rows, cache.source); state.updated = new Date(cache.at); state.offline = true; } catch {} }
     } else state.offline = true;
     if (!quiet && state.model) toast('Couldn’t reach the sheet — showing the last saved copy', true);
   } finally {
