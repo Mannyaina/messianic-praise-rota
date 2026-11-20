@@ -230,6 +230,33 @@ function myAssignments() {
   return out.sort((a, b) => a.from - b.from || a.slot.i - b.slot.i);
 }
 
+/* ---------- programme ---------- */
+const PROG = (() => {
+  const P = window.MP_PROGRAMME; if (!P) return null;
+  const flat = [];
+  P.sections.forEach((sec, si) => sec.items.forEach(([tm, title, dur, kind]) => flat.push({ si, title, dur, kind, start: onEvent(parseTime(tm)) })));
+  flat.forEach((it, i) => { const nx = flat[i + 1]; it.end = nx && nx.start > it.start ? nx.start : new Date(+it.start + Math.max(it.dur, 1) * 60000); });
+  return { draft: P.draft, sections: P.sections, items: flat };
+})();
+function progNow(t = now()) {
+  if (!PROG) return {};
+  const items = PROG.items.filter((it) => it.title !== 'Close');
+  const cur = [...items].reverse().find((it) => t >= it.start && t < it.end);
+  const next = items.find((it) => it.start > t && it !== cur);
+  return { cur, next, first: items[0], last: PROG.items[PROG.items.length - 1] };
+}
+function stageCard(t = now(), compact) {
+  const { cur, next, first, last } = progNow(t);
+  if (!PROG || !first || t < new Date(+first.start - 6 * 36e5) || t >= last.start) return '';
+  const pct = cur ? Math.min(100, ((t - cur.start) / (cur.end - cur.start)) * 100) : 0;
+  return `<a class="stage card" href="#prog">
+    <div class="stage-top"><span class="kicker">${cur ? 'On stage now' : 'Up first'}</span><span class="kicker">${cur ? 'until ' + hm(cur.end) : hm((next || first).start)}</span></div>
+    <div class="stage-title">${esc(cur ? cur.title : (next || first).title)}</div>
+    ${cur ? `<div class="progress thin"><div style="width:${pct}%"></div></div>` : ''}
+    ${cur && next ? `<div class="stage-next">Next: <b>${esc(next.title)}</b> at ${hm(next.start)} · in ${dur(next.start - t)}</div>` : ''}
+    ${compact ? '' : ''}</a>`;
+}
+
 /* ---------- chips ---------- */
 function chip(name, role, ref, note) {
   const cls = role.toLowerCase();
@@ -334,7 +361,32 @@ const views = {
         ${roster(s, true)}`;
     });
     const nextCard = upcoming ? `<div class="card next-card"><b>Up next:</b> ${esc(upcoming.label)} · ${range(upcoming.start, upcoming.end)} · Dept head ${esc(upcoming.headDisplay || 'TBC')}</div>` : '';
-    return blocks.join('<div style="height:28px"></div>') + nextCard + legend;
+    return stageCard(t) + blocks.join('<div style="height:28px"></div>') + nextCard + legend;
+  },
+
+  prog() {
+    if (!PROG) return `<div class="card empty"><strong>No programme yet</strong></div>`;
+    const t = now(); const { cur } = progNow(t);
+    const m = state.model;
+    let lastSlot = null;
+    const slotAt = (d) => (m ? m.slots.filter((s) => d >= s.start && d < s.end && !/down/i.test(s.label))[0] || m.slots.find((s) => d >= s.start && d < s.end) : null);
+    const secs = PROG.sections.map((sec, si) => {
+      const rows = PROG.items.filter((it) => it.si === si).map((it) => {
+        const st = it === cur ? 'now' : t >= it.end ? 'done' : 'later';
+        const sl = si > 0 ? slotAt(it.start) : null;
+        let div = '';
+        if (sl && sl !== lastSlot) { lastSlot = sl; div = `<div class="p-shift">Media ${esc(sl.label)} · ${range(sl.start, sl.end)} · Head ${esc(sl.headDisplay || 'TBC')}</div>`; }
+        return div + `<div class="p-row ${it.kind} p-${st}"${st === 'now' ? ' id="pnow"' : ''}>
+          <div class="p-time">${hm(it.start)}</div>
+          <div class="p-body"><div class="p-title">${esc(it.title)}</div>${st === 'now' ? `<div class="p-live"><span class="live-dot"></span>On stage now · ends ${hm(it.end)}</div>` : ''}</div>
+          <div class="p-dur">${it.dur ? it.dur + 'm' : ''}</div></div>`;
+      }).join('');
+      return `<div class="section-title"><span class="kicker">${esc(sec.title)}</span><span class="kicker">${esc(sec.note || '')}</span></div><div class="p-list">${rows}</div>`;
+    }).join('');
+    return `<div class="kicker">Fri 27 Nov · ${esc(C.VENUE)}</div>
+      <div class="h-display" style="color:var(--gold);margin:4px 0 4px">Programme</div>
+      ${PROG.draft ? '<div style="font-size:13px;color:var(--muted)">Draft running order — times may change.</div>' : ''}
+      <div style="height:12px"></div>${stageCard(t)}${secs}`;
   },
 
   teams() {
@@ -387,7 +439,7 @@ const views = {
 /* ---------- render ---------- */
 let tab = (location.hash || '').slice(1);
 function render() {
-  if (!['me', 'now', 'teams', 'rota'].includes(tab)) tab = state.me ? 'me' : 'now';
+  if (!['me', 'now', 'prog', 'teams', 'rota'].includes(tab)) tab = state.me ? 'me' : 'now';
   document.querySelectorAll('.tabbar a').forEach((a) => { const on = a.dataset.tab === tab; a.classList.toggle('active', on); a.setAttribute('aria-current', on ? 'page' : 'false'); });
   const view = $('#view');
   document.body.classList.toggle('editing', state.editing);
@@ -405,7 +457,10 @@ function render() {
   window.scrollTo(0, y);
   const rw2 = $('.rota-wrap'); if (rw2 && rs) { rw2.scrollLeft = rs[0]; rw2.scrollTop = rs[1]; }
 }
-window.addEventListener('hashchange', () => { tab = location.hash.slice(1); render(); window.scrollTo(0, 0); });
+window.addEventListener('hashchange', () => {
+  tab = location.hash.slice(1); render(); window.scrollTo(0, 0);
+  if (tab === 'prog') { const el = document.getElementById('pnow'); if (el) setTimeout(() => el.scrollIntoView({ block: 'center', behavior: 'smooth' }), 120); }
+});
 
 /* ---------- events ---------- */
 document.addEventListener('click', (e) => {
@@ -612,7 +667,7 @@ function runSplash(done) {
 runSplash(() => { render(); setSync(); showInstall(); });
 load(true);
 setInterval(() => { if (document.visibilityState === 'visible') load(true); }, C.REFRESH_SECONDS * 1000);
-setInterval(() => { setSync(); if (document.visibilityState === 'visible' && !$('#sheet').innerHTML && (tab === 'now' || tab === 'me')) render(); }, 15000);
+setInterval(() => { setSync(); if (document.visibilityState === 'visible' && !$('#sheet').innerHTML && (tab === 'now' || tab === 'me' || tab === 'prog')) render(); }, 15000);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') load(true); });
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 })();
