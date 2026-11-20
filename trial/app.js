@@ -214,8 +214,8 @@ function slotState(s, t = now()) { return t >= s.end ? 'done' : t >= s.start ? '
 function activeSlots(t = now()) { return state.model.slots.filter((s) => t >= s.start && t < s.end); }
 function namesFor(cell, t) {
   if (!cell || !cell.segs.length) return [];
-  if (t) { const live = cell.segs.filter((sg) => t >= sg.from && t < sg.to); if (live.length) return live.map((sg) => ({ name: sg.name })); }
-  return cell.segs.map((sg) => ({ name: sg.name, note: cell.full ? '' : range(sg.from, sg.to) }));
+  if (t) { const live = cell.segs.filter((sg) => t >= sg.from && t < sg.to); if (live.length) return live.flatMap((sg) => splitNames(sg.name).map((name) => ({ name }))); }
+  return cell.segs.flatMap((sg) => splitNames(sg.name).map((name) => ({ name, note: cell.full ? '' : range(sg.from, sg.to) })));
 }
 function myAssignments() {
   const m = state.model, out = [];
