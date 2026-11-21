@@ -180,6 +180,9 @@ async function doLoad(quiet) {
   state.loading = true; setSync();
   try {
     const { rows, source } = await fetchRows();
+    const sig = JSON.stringify(rows);
+    if (sig === state.sig && state.model) { state.updated = new Date(); state.error = null; state.offline = false; state.unchanged = true; return; }
+    state.sig = sig; state.unchanged = false;
     state.model = buildModel(rows, source);
     state.updated = new Date(); state.error = null; state.offline = false;
     if (source !== 'demo') store.set('mp_cache', { rows, source, at: state.updated.toISOString() });
@@ -192,7 +195,9 @@ async function doLoad(quiet) {
     } else state.offline = true;
     if (!quiet && state.model) toast('Couldn’t reach the sheet — showing the last saved copy', true);
   } finally {
-    state.loading = false; setSync(); render();
+    state.loading = false; setSync();
+    if (!state.unchanged || !$('#view').innerHTML.trim() || /Loading the rota|Can\u2019t load/.test($('#view').textContent)) render();
+    state.unchanged = false;
   }
 }
 
@@ -438,6 +443,25 @@ const views = {
     }).join('');
     const body = m.teams.map((tm) => `<tr><td class="team" scope="row">${esc(tm.name)}</td>${m.slots.map((s) => `<td class="${slotState(s, t) === 'now' ? 'now' : ''}"><div class="stack">${
       tm.roles.map((ro) => cellChips(tm, ro, s, null)).join('')}</div></td>`).join('')}</tr>`).join('');
+    const wide = matchMedia('(min-width: 900px)').matches;
+    let body2 = '';
+    if (!wide) {
+      let sel = m.slots.find((x) => x.id === state.rotaSlot);
+      if (!sel) sel = m.slots.find((x) => slotState(x, t) === 'now' && !/down/i.test(x.label)) || m.slots.find((x) => x.start > t) || m.slots[0];
+      const st = slotState(sel, t);
+      const mRef = state.editing && sel.ministerRow >= 0 ? esc(JSON.stringify({ kind: 'meta', label: 'Minister in charge', slot: sel.id, row: sel.ministerRow, col: sel.c0, span: sel.span, value: sel.minister })) : '';
+      const hRef = state.editing && sel.headRow >= 0 ? esc(JSON.stringify({ kind: 'meta', label: 'Department head', slot: sel.id, row: sel.headRow, col: sel.c0, span: sel.span, value: sel.head })) : '';
+      const tabs = m.slots.map((x) => `<button type="button" class="tchip ${x === sel ? 'on' : ''}" data-rslot="${x.id}" aria-pressed="${x === sel}">${esc(x.label)}${slotState(x, t) === 'now' ? ' <span class="live-dot sm"></span>' : ''}</button>`).join('');
+      const teams = m.teams.map((tm) => `<div class="rt-card"><div class="rt-name">${esc(tm.name)}</div>${
+        tm.roles.map((ro) => `<div class="tl-line"><span class="role-tag ${roleKind(ro.role)}">${esc(ro.role)}</span><span class="chipset">${cellChips(tm, ro, sel, null, true)}</span></div>`).join('')}</div>`).join('');
+      body2 = `<div class="chips-scroll rslots" role="group" aria-label="Choose shift">${tabs}</div>
+        <div class="rt-head card ${st === 'now' ? 'now' : ''}">
+          <div><div class="rt-slot">${esc(sel.label)}</div><div class="rt-time">${range(sel.start, sel.end)}${st === 'now' ? ' · <b style="color:var(--live)">ON NOW</b>' : st === 'done' ? ' · finished' : ''}</div></div>
+          <div class="rt-meta"><div>Head: ${state.editing ? `<button type="button" class="linkish" data-edit='${hRef}'>${esc(sel.head || 'Set head')}</button>` : `<b>${esc(sel.headDisplay || 'TBC')}</b>`}</div>
+          <div>Minister: ${state.editing ? `<button type="button" class="linkish" data-edit='${mRef}'>${esc(sel.minister || 'Set minister')}</button>` : `<b>${esc(sel.minister || 'TBC')}</b>`}</div></div>
+        </div>
+        <div class="rt-list">${teams}</div>`;
+    }
     return `<div class="kicker">${esc(C.VENUE)} · Fri 27 Nov</div>
       <div class="h-display" style="color:var(--gold);margin-top:4px">Full media rota</div>
       <div class="rota-actions">
@@ -446,7 +470,7 @@ const views = {
         <a class="btn small ghost" href="${sheetUrl}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/></svg>Open Google Sheet</a>
       </div>
       <div class="legend"><span><i style="background:var(--gold)"></i>Lead</span><span><i style="background:#fff"></i>Main</span><span><i style="border:1.5px solid #5A6A9E"></i>Backup</span><span><i style="background:#1F3170;outline:2px solid var(--gold)"></i>On now</span></div>
-      <div class="rota-wrap"><table class="rota"><thead><tr><th class="team" scope="col">Team</th>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+      ${wide ? `<div class="rota-wrap"><table class="rota"><thead><tr><th class="team" scope="col">Team</th>${head}</tr></thead><tbody>${body}</tbody></table></div>` : body2}`;
   }
 };
 
@@ -471,6 +495,7 @@ function render() {
   window.scrollTo(0, y);
   const rw2 = $('.rota-wrap'); if (rw2 && rs) { rw2.scrollLeft = rs[0]; rw2.scrollTop = rs[1]; }
 }
+matchMedia('(min-width: 900px)').addEventListener?.('change', () => tab === 'rota' && render());
 window.addEventListener('hashchange', () => {
   tab = location.hash.slice(1); render(); window.scrollTo(0, 0);
   if (tab === 'prog') { const el = document.getElementById('pnow'); if (el) setTimeout(() => el.scrollIntoView({ block: 'center', behavior: 'smooth' }), 120); }
@@ -484,6 +509,7 @@ document.addEventListener('click', (e) => {
   if (el.id === 'retry' || el.id === 'syncBtn') return load();
   if (el.id === 'printBtn') return window.print();
   if (el.id === 'leaderBtn') return state.editing ? stopEditing() : startEditing();
+  if (el.dataset.rslot) { state.rotaSlot = el.dataset.rslot; render(); const h = $('.rt-head'); if (h && h.getBoundingClientRect().top < 70) h.scrollIntoView({ block: 'start' }); return; }
   if (el.dataset.team) { state.team = el.dataset.team; store.set('mp_team', state.team); return render(); }
   if (el.dataset.edit && state.editing) { try { return openEditor(JSON.parse(el.dataset.edit)); } catch {} }
 });
@@ -685,16 +711,18 @@ function runSplash(done) {
   window.addEventListener('touchstart', (e) => {
     if (busy || window.scrollY > 0 || !$('#sheet').hidden || e.touches.length > 1 || e.target.closest('.rota-wrap,.chips-scroll,#splash')) { y0 = null; return; }
     y0 = e.touches[0].clientY; pull = 0;
+    window.addEventListener('touchmove', onMove, { passive: false });
   }, { passive: true });
-  window.addEventListener('touchmove', (e) => {
+  function onMove(e) {
     if (y0 == null) return;
     const dy = e.touches[0].clientY - y0;
     if (dy <= 0 || window.scrollY > 0) { if (pull) set(0); pull = 0; return; }
     e.preventDefault();
     pull = Math.min(130, dy * 0.55); set(pull);
     lbl.textContent = pull > TRIGGER ? 'Release to refresh' : 'Pull to refresh';
-  }, { passive: false });
-  window.addEventListener('touchend', async () => {
+  }
+  const endTouch = async () => {
+    window.removeEventListener('touchmove', onMove, { passive: false });
     if (y0 == null) return; y0 = null;
     if (pull <= TRIGGER) { ptr.classList.add('ease'); set(0); setTimeout(() => ptr.classList.remove('ease'), 250); pull = 0; return; }
     busy = true; ptr.classList.add('ease', 'spin'); set(64); lbl.textContent = 'Checking the sheet…';
@@ -703,14 +731,16 @@ function runSplash(done) {
     lbl.textContent = state.error ? 'Couldn\u2019t reach the sheet' : 'Up to date';
     setTimeout(() => { ptr.classList.remove('spin'); set(0); setTimeout(() => { ptr.classList.remove('ease'); busy = false; }, 260); }, 550);
     pull = 0;
-  });
+  };
+  window.addEventListener('touchend', endTouch); window.addEventListener('touchcancel', endTouch);
 })();
 
 /* ---------- boot ---------- */
 runSplash(() => { render(); setSync(); showInstall(); });
 load(true);
 setInterval(() => { if (document.visibilityState === 'visible') load(true); }, C.REFRESH_SECONDS * 1000);
-setInterval(() => { setSync(); if (document.visibilityState === 'visible' && !$('#sheet').innerHTML && (tab === 'now' || tab === 'me' || tab === 'prog')) render(); }, 15000);
+let lastScroll = 0; window.addEventListener('scroll', () => { lastScroll = Date.now(); }, { passive: true });
+setInterval(() => { setSync(); if (document.visibilityState === 'visible' && !$('#sheet').innerHTML && Date.now() - lastScroll > 4000 && (tab === 'now' || tab === 'me' || tab === 'prog')) render(); }, 30000);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') load(true); });
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 })();

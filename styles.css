@@ -72,7 +72,7 @@ svg{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-lin
 #app{min-height:100dvh;display:flex;flex-direction:column;animation:appIn .5s ease-out}
 @keyframes appIn{from{opacity:0;transform:scale(.985)}to{opacity:1;transform:none}}
 .topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;gap:12px;
-  padding:calc(10px + var(--st)) 16px 10px;background:rgba(11,21,51,.92);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-bottom:1px solid rgba(42,58,110,.6)}
+  padding:calc(10px + var(--st)) 16px 10px;background:#0B1533;border-bottom:1px solid rgba(42,58,110,.6)}
 .brand{display:flex;align-items:center;gap:10px;min-width:0}
 .brand-logo{width:46px;height:auto}
 .brand-title{font:700 17px/1.1 var(--display);letter-spacing:.04em;color:var(--gold);text-transform:uppercase;white-space:nowrap}
@@ -85,7 +85,7 @@ svg{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-lin
 .icon-btn.on{background:var(--gold);color:var(--bg);border-color:var(--gold)}
 main{flex:1;padding:16px 16px calc(96px + var(--sb));max-width:960px;width:100%;margin:0 auto;outline:none}
 .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:20;display:grid;grid-template-columns:repeat(5,1fr);padding-bottom:var(--sb);
-  background:rgba(15,27,64,.96);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-top:1px solid var(--line)}
+  background:#0F1B40;border-top:1px solid var(--line)}
 .tabbar a{min-height:62px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:10.5px;white-space:nowrap;font-weight:600;color:var(--muted);text-decoration:none}
 .tabbar svg{width:22px;height:22px}
 .tabbar a.active{color:var(--gold)}
@@ -199,7 +199,7 @@ button.chip{cursor:default}
 
 /* ================= FULL ROTA ================= */
 .rota-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
-.rota-wrap{margin-top:14px;overflow:auto;border:1px solid var(--line);border-radius:16px;max-height:calc(100dvh - 300px);-webkit-overflow-scrolling:touch}
+.rota-wrap{margin-top:14px;overflow-x:auto;border:1px solid var(--line);border-radius:16px}
 table.rota{border-collapse:separate;border-spacing:0;min-width:980px;width:100%;font-size:13px}
 .rota th,.rota td{border-bottom:1px solid var(--line);border-left:1px solid var(--line);padding:9px 10px;vertical-align:top;text-align:left}
 .rota thead th{position:sticky;top:0;z-index:2;background:var(--bg2)}
@@ -285,3 +285,19 @@ table.rota{border-collapse:separate;border-spacing:0;min-width:980px;width:100%;
 .ptr.ease{transition:height .25s ease,opacity .25s ease}
 .ptr.spin img{animation:ptrSpin .7s linear infinite}
 @keyframes ptrSpin{to{transform:rotate(360deg)}}
+
+/* full rota — phone: one shift at a time */
+.rslots{margin-top:14px}
+.live-dot.sm{display:inline-block;width:8px;height:8px;margin-left:6px;vertical-align:1px}
+.tchip.on .live-dot.sm{background:var(--live)}
+.rt-head{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px 16px;padding:14px 16px;margin-top:4px;scroll-margin-top:80px}
+.rt-head.now{border-color:var(--gold);background:var(--card2)}
+.rt-slot{font:700 30px/1 var(--display);text-transform:uppercase;color:var(--gold)}
+.rt-time{font-size:14px;color:var(--soft);margin-top:4px}
+.rt-meta{font-size:13px;color:var(--muted);display:flex;flex-direction:column;gap:2px;justify-content:center}
+.rt-meta b{color:#fff}
+.linkish{border:0;background:none;padding:0;color:var(--gold2);font:inherit;font-weight:700;text-decoration:underline dotted;text-underline-offset:3px}
+.rt-list{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+.rt-card{padding:12px 14px;border-radius:14px;border:1px solid var(--line);display:flex;flex-direction:column;gap:7px;contain:content}
+.rt-name{font-size:16px;font-weight:800;margin-bottom:2px}
+.rt-card .tl-line .role-tag{max-width:46%}
