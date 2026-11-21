@@ -14,5 +14,5 @@ window.MP_CONFIG = {
   VENUE: 'The Ark Pavilion, Birmingham',
 
   // How often to re-read the sheet while the app is open
-  REFRESH_SECONDS: 30
+  REFRESH_SECONDS: 15
 };
