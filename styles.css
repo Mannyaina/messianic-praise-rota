@@ -278,3 +278,10 @@ table.rota{border-collapse:separate;border-spacing:0;min-width:980px;width:100%;
 
 .chip-role{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;opacity:.65;margin-right:6px;white-space:nowrap}
 .chip.empty-slot .chip-role{opacity:.9}
+
+/* pull to refresh */
+.ptr{height:0;opacity:0;overflow:hidden;display:flex;align-items:center;justify-content:center;gap:10px;font-size:13px;font-weight:600;color:var(--soft)}
+.ptr img{width:34px;height:auto}
+.ptr.ease{transition:height .25s ease,opacity .25s ease}
+.ptr.spin img{animation:ptrSpin .7s linear infinite}
+@keyframes ptrSpin{to{transform:rotate(360deg)}}

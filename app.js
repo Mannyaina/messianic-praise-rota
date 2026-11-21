@@ -167,15 +167,16 @@ async function fetchRows() {
     return { rows: j.values, source: 'script' };
   }
   const url = `https://docs.google.com/spreadsheets/d/${C.SHEET_ID}/gviz/tq?tqx=out:csv&headers=0&sheet=${encodeURIComponent(C.SHEET_NAME)}&t=${Date.now()}`;
-  const res = await fetch(url, { cache: 'no-store' });
+  const res = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout ? AbortSignal.timeout(12000) : undefined });
   if (!res.ok) throw new Error('Sheet returned ' + res.status);
   const text = await res.text();
   if (/^\s*</.test(text)) throw new Error('The sheet is not shared publicly');
   return { rows: parseCSV(text), source: 'csv' };
 }
 
-async function load(quiet) {
-  if (state.loading) return;
+let loadP = null;
+function load(quiet) { if (!loadP) loadP = doLoad(quiet).finally(() => { loadP = null; }); return loadP; }
+async function doLoad(quiet) {
   state.loading = true; setSync();
   try {
     const { rows, source } = await fetchRows();
@@ -675,6 +676,35 @@ function runSplash(done) {
   const timer = setTimeout(finish, len);
   sp.addEventListener('click', () => { clearTimeout(timer); finish(); });
 }
+
+/* ---------- pull down to refresh ---------- */
+(() => {
+  const ptr = $('#ptr'), lbl = $('#ptrText'); if (!ptr) return;
+  const TRIGGER = 72; let y0 = null, pull = 0, busy = false;
+  const set = (h) => { ptr.style.height = h + 'px'; ptr.style.opacity = Math.min(1, h / 40); ptr.querySelector('img').style.transform = `rotate(${h * 4}deg)`; };
+  window.addEventListener('touchstart', (e) => {
+    if (busy || window.scrollY > 0 || !$('#sheet').hidden || e.touches.length > 1 || e.target.closest('.rota-wrap,.chips-scroll,#splash')) { y0 = null; return; }
+    y0 = e.touches[0].clientY; pull = 0;
+  }, { passive: true });
+  window.addEventListener('touchmove', (e) => {
+    if (y0 == null) return;
+    const dy = e.touches[0].clientY - y0;
+    if (dy <= 0 || window.scrollY > 0) { if (pull) set(0); pull = 0; return; }
+    e.preventDefault();
+    pull = Math.min(130, dy * 0.55); set(pull);
+    lbl.textContent = pull > TRIGGER ? 'Release to refresh' : 'Pull to refresh';
+  }, { passive: false });
+  window.addEventListener('touchend', async () => {
+    if (y0 == null) return; y0 = null;
+    if (pull <= TRIGGER) { ptr.classList.add('ease'); set(0); setTimeout(() => ptr.classList.remove('ease'), 250); pull = 0; return; }
+    busy = true; ptr.classList.add('ease', 'spin'); set(64); lbl.textContent = 'Checking the sheet…';
+    if (navigator.vibrate) try { navigator.vibrate(10); } catch {}
+    await Promise.all([load(), new Promise((r) => setTimeout(r, 600))]);
+    lbl.textContent = state.error ? 'Couldn\u2019t reach the sheet' : 'Up to date';
+    setTimeout(() => { ptr.classList.remove('spin'); set(0); setTimeout(() => { ptr.classList.remove('ease'); busy = false; }, 260); }, 550);
+    pull = 0;
+  });
+})();
 
 /* ---------- boot ---------- */
 runSplash(() => { render(); setSync(); showInstall(); });
