@@ -275,3 +275,6 @@ table.rota{border-collapse:separate;border-spacing:0;min-width:980px;width:100%;
 .p-row.p-now .p-time{color:var(--live)}
 .p-live{display:flex;align-items:center;gap:8px;margin-top:5px;font-size:12px;font-weight:700;color:var(--live)}
 .p-shift{margin:10px 0 2px;padding:6px 12px;border-left:3px solid var(--gold);font-size:12px;font-weight:600;color:var(--soft);background:rgba(232,190,74,.06);border-radius:0 8px 8px 0}
+
+.chip-role{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;opacity:.65;margin-right:6px;white-space:nowrap}
+.chip.empty-slot .chip-role{opacity:.9}

@@ -45,7 +45,12 @@ function onEvent(mins) {
 const DEFAULT_TIMES = { 'set-up': ['15:00', '19:00'], 'shift 1': ['19:00', '22:00'], 'shift 2': ['22:00', '01:00'], 'shift 3': ['01:00', '04:00'], 'shift 4': ['04:00', '07:00'], 'set-down': ['06:00', '07:00'] };
 
 /* ---------- names ---------- */
-const splitNames = (s) => String(s || '').split(/\s*(?:\/|,|&|\+|\band\b)\s*/i).map((x) => x.trim()).filter(Boolean);
+const niceName = (n) => (/[A-Z]{3,}/.test(n) && n === n.toUpperCase() ? n.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()) : n);
+const splitNames = (s) => String(s || '').split(/\s*(?:\/|,|&|\+|\band\b)\s*/i).map((x) => niceName(x.trim())).filter(Boolean);
+// role labels can be anything ("Team Lead", "Cam 1", "Director/ Switcher"); colour them by kind
+const roleKind = (label) => (/lead|director|head/i.test(label) ? 'lead' : /back|reserve|standby/i.test(label) ? 'backup' : 'main');
+const isStdRole = (label) => /^(team lead|lead|main|backup)$/i.test(String(label).trim());
+const roleLabel = (label) => String(label).replace(/\s*\/\s*/g, ' / ').replace(/^team lead$/i, 'Lead');
 const key = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
 const isMe = (s) => !!state.me && splitNames(s).some((n) => key(n) === key(state.me));
 
@@ -114,8 +119,8 @@ function buildModel(rows, source) {
   const teams = []; let cur = null;
   for (let r = hr + 1; r < R; r++) {
     const roleTxt = v(r, roleCol);
-    const role = /lead/i.test(roleTxt) ? 'Lead' : /main/i.test(roleTxt) ? 'Main' : /back/i.test(roleTxt) ? 'Backup' : null;
-    const tName = v(r, teamCol);
+    const role = roleTxt ? roleLabel(roleTxt) : null;
+    const tName = v(r, teamCol).replace(/\s*\/\s*/g, ' / ');
     if (tName && role) { cur = { name: tName, roles: [] }; teams.push(cur); }
     if (!role || !cur) continue;
     const cells = {};
@@ -227,7 +232,14 @@ function myAssignments() {
     if (isMe(s.minister)) out.push({ slot: s, team: 'Minister in charge', role: 'Leader', from: s.start, to: s.end });
     if (isMe(s.headDisplay)) out.push({ slot: s, team: 'Department head', role: 'Leader', from: s.start, to: s.end });
   }
-  return out.sort((a, b) => a.from - b.from || a.slot.i - b.slot.i);
+  // one entry per shift + team, even when someone covers several roles (e.g. Cam 1–6 at Set-Up)
+  const merged = [];
+  for (const a of out) {
+    const same = merged.find((x) => x.slot === a.slot && x.team === a.team && +x.from === +a.from && +x.to === +a.to);
+    if (same) { if (!same.roles.includes(a.role)) same.roles.push(a.role); same.role = same.roles.join(', '); }
+    else merged.push({ ...a, roles: [a.role] });
+  }
+  return merged.sort((a, b) => a.from - b.from || a.slot.i - b.slot.i);
 }
 
 /* ---------- programme ---------- */
@@ -258,20 +270,21 @@ function stageCard(t = now(), compact) {
 }
 
 /* ---------- chips ---------- */
-function chip(name, role, ref, note) {
-  const cls = role.toLowerCase();
+function chip(name, role, ref, note, showRole) {
+  const cls = roleKind(role);
   const me = name && isMe(name) ? ' me' : '';
-  const label = name ? esc(name) + (note ? ` <small style="opacity:.7;font-weight:500">&nbsp;${esc(note)}</small>` : '') : 'Not set';
+  const label = (showRole ? `<small class="chip-role">${esc(role)}</small>` : '') + (name ? esc(name) + (note ? ` <small style="opacity:.7;font-weight:500">&nbsp;${esc(note)}</small>` : '') : 'Not set');
   const data = ref ? ` data-edit='${esc(JSON.stringify(ref))}'` : '';
   const aria = `${role}: ${name || 'not set'}`;
   return `<button type="button" class="chip ${name ? cls : 'empty-slot'}${me}"${data} aria-label="${esc(aria)}"${ref && state.editing ? '' : ' tabindex="-1"'}>${label}</button>`;
 }
-function cellChips(team, ro, s, t) {
+function cellChips(team, ro, s, t, noRole) {
+  const show = !noRole && !isStdRole(ro.role);
   const cell = ro.cells[s.id];
   const ref = state.editing ? { kind: 'cell', team: team.name, role: ro.role, slot: s.id, row: cell.row, col: cell.col, span: cell.span, value: cell.segs.map((x) => x.name).join(' / ') } : null;
   const names = namesFor(cell, t);
-  if (!names.length) return chip('', ro.role, ref);
-  return names.map((n) => chip(n.name, ro.role, ref, n.note)).join('');
+  if (!names.length) return chip('', ro.role, ref, '', show);
+  return names.map((n) => chip(n.name, ro.role, ref, n.note, show)).join('');
 }
 
 /* ---------- views ---------- */
@@ -294,9 +307,9 @@ const views = {
     if (next) {
       const live = next === cur;
       const s = next.slot;
-      const leadCell = next.teamObj ? next.teamObj.roles.find((r) => r.role === 'Lead') : null;
+      const leadCell = next.teamObj ? next.teamObj.roles.find((r) => roleKind(r.role) === 'lead') : null;
       const leadNames = leadCell ? namesFor(leadCell.cells[s.id], live ? t : null).map((n) => n.name).join(', ') : '';
-      const mates = next.teamObj ? next.teamObj.roles.filter((r) => r.role !== next.role).flatMap((r) => namesFor(r.cells[s.id]).map((n) => `${n.name} (${r.role})`)).filter((x) => !isMe(x.replace(/\s*\(.*\)$/, ''))) : [];
+      const mates = next.teamObj ? next.teamObj.roles.filter((r) => !next.roles.includes(r.role)).flatMap((r) => namesFor(r.cells[s.id]).filter((n) => !isMe(n.name)).map((n) => `${n.name} (${r.role})`)) : [];
       hero = `<section class="hero ${live ? 'live' : ''}">
           <div class="kicker">${live ? 'You’re on now' : 'Your next shift'}</div>
           <div class="hero-top"><div class="h-display">${esc(s.label)}</div>
@@ -305,7 +318,7 @@ const views = {
           <div class="chips"><span class="pill dark">${esc(next.team)}</span><span class="pill outline">${esc(next.role === 'Leader' ? 'On duty' : next.role)}</span></div>
         </section>
         <div class="card people">
-          ${next.teamObj ? `<div class="row"><span>${esc(next.team)} team lead</span><span>${esc(next.role === 'Lead' ? 'You' : leadNames || 'TBC')}</span></div>` : ''}
+          ${next.teamObj && leadCell ? `<div class="row"><span>${esc(next.team)} · ${esc(leadCell ? leadCell.role : 'Lead')}</span><span>${esc(leadCell && next.roles.includes(leadCell.role) ? 'You' : leadNames || 'TBC')}</span></div>` : ''}
           ${mates.length ? `<div class="row"><span>With you</span><span>${esc(mates.join(', '))}</span></div>` : ''}
           <div class="row"><span>Department head</span><span>${esc(s.headDisplay || 'TBC')}</span></div>
           <div class="row"><span>Minister in charge</span><span>${esc(s.minister || 'TBC')}</span></div>
@@ -402,7 +415,7 @@ const views = {
       const st = slotState(s, t);
       return `<div class="tl-item"><div class="tl-when"><b style="color:${st === 'now' ? 'var(--gold)' : st === 'done' ? 'var(--muted)' : '#fff'}">${esc(s.label)}</b><small>${range(s.start, s.end)}</small></div>
         <div class="tl-card ${st === 'now' ? 'now' : ''}">
-          ${team.roles.map((ro) => `<div class="tl-line"><span class="role-tag ${ro.role.toLowerCase()}">${ro.role}</span><span class="chipset">${cellChips(team, ro, s, null)}</span></div>`).join('')}
+          ${team.roles.map((ro) => `<div class="tl-line"><span class="role-tag ${roleKind(ro.role)}">${esc(ro.role)}</span><span class="chipset">${cellChips(team, ro, s, null, true)}</span></div>`).join('')}
           <div class="tl-foot">Dept head: ${esc(s.headDisplay || 'TBC')}${st === 'now' ? ' · <span style="color:var(--live);font-weight:700">ON NOW</span>' : ''}</div>
         </div></div>`;
     }).join('');
