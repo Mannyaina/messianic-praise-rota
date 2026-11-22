@@ -1,0 +1,17 @@
+{
+  "name": "TRIAL · MP Media Rota",
+  "short_name": "MP Trial",
+  "description": "Media team rota for Messianic Praise! 2026 — your shifts, who's leading, and who's on now.",
+  "id": "./",
+  "start_url": "./?source=homescreen",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#070E26",
+  "theme_color": "#0B1533",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
