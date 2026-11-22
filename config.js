@@ -9,6 +9,11 @@ window.MP_CONFIG = {
   SCRIPT_URL: '',
   SIGNIN_SHEET: 'Sign-ins',
 
+  // Shift sign-in shared through ntfy (used until SCRIPT_URL is set)
+  NTFY_LOG: 'mp2026-media-d025c907-log',   // the app's sign-in log (nobody needs to subscribe)
+  NTFY_TOPIC: 'mp2026-media-d025c907',     // leaders subscribe to this in the ntfy app for alerts
+  LEADER_PIN_HASH: '161f9e4356abb6e6fb1dff1062d6d21ea15b8c554b6fdcf499c6d6ef3c06a472',
+
   // The day Set-Up starts. Times before 12:00 in the sheet are treated as the next morning.
   EVENT_DAY: '2026-11-27',
   EVENT_NAME: 'Messianic Praise! 2026',

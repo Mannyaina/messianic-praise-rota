@@ -1,6 +1,6 @@
 // Offline support: keep the app shell on the phone; rota data always comes fresh from the sheet
-const VERSION = 'mp-rota-demo-v8';
-const SHELL = ['./', 'index.html', 'styles.css?v=8', 'config.js?v=8', 'demo.js?v=8', 'programme.js?v=8', 'app.js?v=8', 'logo.png', 'manifest.webmanifest',
+const VERSION = 'mp-rota-demo-v9';
+const SHELL = ['./', 'index.html', 'styles.css?v=9', 'config.js?v=9', 'demo.js?v=9', 'programme.js?v=9', 'app.js?v=9', 'logo.png', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/favicon.png'];
 
 self.addEventListener('install', (e) => {

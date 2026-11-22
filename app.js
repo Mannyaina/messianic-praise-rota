@@ -253,7 +253,42 @@ function myAssignments() {
 }
 
 /* ---------- shift sign-in ---------- */
-const SIGNIN_ON = () => !!C.SCRIPT_URL || DEMO;
+const NTFY = () => !C.SCRIPT_URL && !DEMO && !!C.NTFY_LOG;
+const SIGNIN_ON = () => !!C.SCRIPT_URL || DEMO || NTFY();
+
+/* sign-ins shared through ntfy (live stream; works before the Google script is connected) */
+let es = null;
+function ntfyRec(m) {
+  try { const d = JSON.parse(m.message); if (!d.name || !d.slot) return null; return { t: hm(new Date(m.time * 1000)), ts: m.time, name: d.name, slot: d.slot, team: d.team || '', role: d.role || '', status: d.status === 'out' ? 'out' : 'in', by: d.by || d.name, id: m.id }; } catch { return null; }
+}
+function addNtfy(recs) {
+  const ids = new Set(state.signins.map((r) => r.id));
+  const fresh = recs.filter((r) => r && !ids.has(r.id));
+  if (!fresh.length) return false;
+  state.signins = state.signins.concat(fresh).sort((a, b) => (a.ts || 0) - (b.ts || 0));
+  return true;
+}
+let ntfyKick = null;
+function startNtfy() {
+  if (!NTFY() || es) return;
+  const base = `https://ntfy.sh/${encodeURIComponent(C.NTFY_LOG)}`;
+  // first load everything cached, then listen live
+  fetch(`${base}/json?poll=1&since=all`, { cache: 'no-store' }).then((r) => r.text()).then((t) => {
+    if (addNtfy(t.split('\n').filter(Boolean).map((l) => { try { const m = JSON.parse(l); return m.event === 'message' ? ntfyRec(m) : null; } catch { return null; } }))) render();
+  }).catch(() => {});
+  try {
+    es = new EventSource(`${base}/sse?since=1m`);
+    es.onmessage = (ev) => { try { const m = JSON.parse(ev.data); if (m.event === 'message' && addNtfy([ntfyRec(m)])) { clearTimeout(ntfyKick); ntfyKick = setTimeout(render, 300); } } catch {} };
+  } catch {}
+}
+async function ntfyPost(rec, title, tags, prio) {
+  const body = JSON.stringify(rec);
+  const r1 = await fetch(`https://ntfy.sh/${encodeURIComponent(C.NTFY_LOG)}`, { method: 'POST', body });
+  if (!r1.ok) throw new Error('Could not save sign-in (' + r1.status + ')');
+  const m = await r1.json(); addNtfy([ntfyRec(m)]);
+  fetch('https://ntfy.sh/', { method: 'POST', body: JSON.stringify({ topic: C.NTFY_TOPIC, title, message: `${rec.slot} · ${rec.team}${rec.role ? ' · ' + rec.role : ''} · ${hm(now())}`, tags: [tags], priority: prio }) }).catch(() => {});
+}
+async function sha(t) { const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t)); return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join(''); }
 function sigOf(name, slotLabel) {
   const k = key(name); let last = null;
   for (const r of state.signins) if (r.slot === slotLabel && key(r.name) === k) last = r;
@@ -656,13 +691,31 @@ function renderLeaderBar() {
   if (!state.editing) { bar.hidden = true; return; }
   bar.hidden = false;
   bar.innerHTML = `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>
-    <div class="grow"><b>Leader editing on</b> (${esc(state.leader?.name || '')}). Tap any name in Teams or Full rota to change it.</div>
+    <div class="grow"><b>Leader editing on</b> (${esc(state.leader?.name || '')}). ${NTFY() ? 'On Live now, tap a name on the check-in board to mark them present.' : 'Tap any name in Teams or Full rota to change it.'}</div>
     <button class="btn small" type="button" id="leaderBtnOff">Done</button>`;
   bar.querySelector('#leaderBtnOff').onclick = stopEditing;
 }
 function stopEditing() { state.editing = false; render(); toast('Leader editing off'); }
 
 async function api(body) {
+  if (NTFY()) {
+    const okPin = async () => (await sha('mp-' + (body.pin || ''))) === C.LEADER_PIN_HASH;
+    if (body.action === 'signin' || body.action === 'signout') {
+      const out = body.action === 'signout';
+      await ntfyPost({ name: body.name, slot: body.slot, team: body.team, role: body.role, status: out ? 'out' : 'in', by: body.name },
+        out ? `${body.name} signed out` : `${body.name} signed in · ${body.role || body.team}`, out ? 'wave' : 'white_check_mark', 3);
+      return { ok: true, signins: state.signins };
+    }
+    if (!(await okPin())) throw new Error('Wrong PIN');
+    if (body.action === 'verify') return { ok: true };
+    if (body.action === 'mark') {
+      const out = body.value === 'out';
+      await ntfyPost({ name: body.name, slot: body.slot, team: body.team, role: body.role, status: out ? 'out' : 'in', by: body.editor },
+        out ? `${body.name} marked not here` : `${body.name} marked present`, out ? 'x' : 'ballot_box_with_check', 2);
+      return { ok: true, signins: state.signins };
+    }
+    throw new Error('Editing names in the app isn\u2019t switched on yet — use the Google Sheet');
+  }
   if (DEMO) {
     await new Promise((r) => setTimeout(r, 350));
     if (body.action === 'signin' || body.action === 'signout' || body.action === 'mark') {
@@ -686,13 +739,13 @@ async function api(body) {
 }
 
 function startEditing() {
-  if (!C.SCRIPT_URL && !DEMO) {
+  if (!C.SCRIPT_URL && !DEMO && !NTFY()) {
     return openSheet(`<h2>Leader editing</h2><p>In-app editing isn’t switched on yet. Until it is, leaders can edit the Google Sheet directly. The app picks up changes within ${C.REFRESH_SECONDS} seconds.</p>
       <div class="row-btns"><a class="btn primary" href="https://docs.google.com/spreadsheets/d/${C.SHEET_ID}/edit" target="_blank" rel="noopener">Open Google Sheet</a><button class="btn" data-close type="button">Close</button></div>`);
   }
-  if (state.model && !state.model.editable) return toast('Reconnecting to the sheet — try again in a moment', true);
+  if (state.model && !state.model.editable && !NTFY()) return toast('Reconnecting to the sheet — try again in a moment', true);
   if (state.leader && state.leader.pin) { state.editing = true; render(); return toast('Leader editing on — tap a name to change it'); }
-  openSheet(`<h2>Leader sign-in</h2><p>${DEMO ? '<b>Trial:</b> use any name and PIN <b>2711</b>. Edits stay on this device. ' : ''}Department heads and team leads only. Your changes go straight into the Google Sheet and everyone sees them.</p>
+  openSheet(`<h2>Leader sign-in</h2><p>${DEMO ? '<b>Trial:</b> use any name and PIN <b>2711</b>. Edits stay on this device. ' : ''}Department heads and team leads only. ${NTFY() ? 'You can mark people present on the check-in board.' : 'Your changes go straight into the Google Sheet and everyone sees them.'}</p>
     <form id="lf"><div class="field"><label for="ln">Your name</label><input id="ln" required autocomplete="name" value="${esc(state.me)}"></div>
     <div class="field"><label for="lp">Leader PIN</label><input id="lp" required inputmode="numeric" type="password" autocomplete="off"></div>
     <div class="err" id="le"></div>
@@ -711,6 +764,10 @@ function startEditing() {
 }
 
 function openEditor(ref) {
+  if (NTFY()) {
+    return openSheet(`<h2>Edit in the sheet</h2><p>Changing names inside the app comes once the Google script is connected. For now, edit the Google Sheet and everyone sees it within ${C.REFRESH_SECONDS} seconds.</p>
+      <div class="row-btns"><a class="btn primary" href="https://docs.google.com/spreadsheets/d/${C.SHEET_ID}/edit" target="_blank" rel="noopener">Open Google Sheet</a><button class="btn" data-close type="button">Close</button></div>`);
+  }
   const m = state.model, s = m.slots.find((x) => x.id === ref.slot);
   const title = ref.kind === 'meta' ? ref.label : `${ref.team} · ${ref.role}`;
   const opts = m.people.map((p) => `<option value="${esc(p.name)}"></option>`).join('');
@@ -832,6 +889,7 @@ function runSplash(done) {
 })();
 
 /* ---------- boot ---------- */
+startNtfy();
 runSplash(() => { render(); setSync(); showInstall(); });
 load(true);
 setInterval(() => { if (document.visibilityState === 'visible') load(true); }, C.REFRESH_SECONDS * 1000);
