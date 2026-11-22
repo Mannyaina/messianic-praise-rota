@@ -148,30 +148,33 @@ function buildModel(rows, source) {
   teams.forEach((t) => t.roles.forEach((ro) => Object.values(ro.cells).forEach((cell) => cell.segs.forEach((sg) => add(sg.name, t.name)))));
   slots.forEach((s) => { add(s.minister, 'Minister in charge'); add(s.headDisplay, 'Department head'); });
 
-  return { slots, teams, people: [...people.values()].sort((a, b) => a.name.localeCompare(b.name)), source, editable: source === 'script' || source === 'demo' };
+  return { slots, teams, people: [...people.values()].sort((a, b) => a.name.localeCompare(b.name)), source, editable: !!C.SCRIPT_URL || source === 'demo' };
 }
 
 /* ---------- data loading ---------- */
 const state = {
   model: null, updated: null, loading: false, error: null, offline: false,
-  me: store.get('mp_me', DEMO ? 'Manny' : ''), demoRows: null, team: store.get('mp_team', ''),
+  me: store.get('mp_me', DEMO ? 'Manny' : ''), demoRows: null, signins: [], team: store.get('mp_team', ''),
   leader: store.get('mp_leader', null), editing: false
 };
 
 async function fetchRows() {
   if (DEMO) { if (!state.demoRows) state.demoRows = window.MP_DEMO_ROWS.map((r) => r.slice()); return { rows: state.demoRows.map((r) => r.slice()), source: 'demo' }; }
-  if (C.SCRIPT_URL) {
-    const res = await fetch(C.SCRIPT_URL + (C.SCRIPT_URL.includes('?') ? '&' : '?') + 'action=read&t=' + Date.now());
-    const j = await res.json();
-    if (!j.ok) throw new Error(j.error || 'Read failed');
-    return { rows: j.values, source: 'script' };
-  }
   const url = `https://docs.google.com/spreadsheets/d/${C.SHEET_ID}/gviz/tq?tqx=out:csv&headers=0&sheet=${encodeURIComponent(C.SHEET_NAME)}&t=${Date.now()}`;
   const res = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout ? AbortSignal.timeout(12000) : undefined });
   if (!res.ok) throw new Error('Sheet returned ' + res.status);
   const text = await res.text();
   if (/^\s*</.test(text)) throw new Error('The sheet is not shared publicly');
-  return { rows: parseCSV(text), source: 'csv' };
+  const out = { rows: parseCSV(text), source: 'csv' };
+  if (C.SCRIPT_URL) out.signins = await fetchSignins().catch(() => null);
+  return out;
+}
+async function fetchSignins() {
+  const url = `https://docs.google.com/spreadsheets/d/${C.SHEET_ID}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent(C.SIGNIN_SHEET || 'Sign-ins')}&t=${Date.now()}`;
+  const res = await fetch(url, { cache: 'no-store' });
+  const rows = parseCSV(await res.text());
+  if (!rows.length || !/status/i.test((rows[0] || []).join(','))) return []; // tab not created yet
+  return rows.slice(1).filter((r) => r[1]).map((r) => ({ t: r[0], name: r[1], slot: r[2], team: r[3], role: r[4], status: r[5], by: r[6] }));
 }
 
 let loadP = null;
@@ -179,8 +182,9 @@ function load(quiet) { if (!loadP) loadP = doLoad(quiet).finally(() => { loadP =
 async function doLoad(quiet) {
   state.loading = true; setSync();
   try {
-    const { rows, source } = await fetchRows();
-    const sig = JSON.stringify(rows);
+    const { rows, source, signins } = await fetchRows();
+    if (signins) state.signins = signins;
+    const sig = JSON.stringify(rows) + JSON.stringify(state.signins);
     if (sig === state.sig && state.model) { state.updated = new Date(); state.error = null; state.offline = false; state.unchanged = true; return; }
     state.sig = sig; state.unchanged = false;
     state.model = buildModel(rows, source);
@@ -248,6 +252,72 @@ function myAssignments() {
   return merged.sort((a, b) => a.from - b.from || a.slot.i - b.slot.i);
 }
 
+/* ---------- shift sign-in ---------- */
+const SIGNIN_ON = () => !!C.SCRIPT_URL || DEMO;
+function sigOf(name, slotLabel) {
+  const k = key(name); let last = null;
+  for (const r of state.signins) if (r.slot === slotLabel && key(r.name) === k) last = r;
+  return last && last.status === 'in' ? last : null;
+}
+const sigTime = (r) => { const m = String(r.t || '').match(/(\d{1,2}):(\d{2})/); return m ? pad(m[1]) + ':' + m[2] : ''; };
+function slotPeople(s) {
+  const out = [], seen = new Set();
+  for (const tm of state.model.teams) for (const ro of tm.roles) for (const sg of ro.cells[s.id].segs) for (const n of splitNames(sg.name)) {
+    const k = key(n); if (seen.has(k)) continue; seen.add(k); out.push({ name: n, team: tm.name, role: ro.role });
+  }
+  return out;
+}
+function checkStatus(p, s, t = now()) {
+  const r = sigOf(p.name, s.label);
+  if (r) return { st: 'in', r };
+  return { st: t >= new Date(+s.start + 10 * 60000) ? 'late' : 'wait' };
+}
+async function doSign(action, a) {
+  const btn = document.querySelector('[data-sign]'); if (btn) btn.disabled = true;
+  try {
+    const j = await api({ action, name: state.me, slot: a.slot.label, team: a.team, role: a.role });
+    if (j.signins) state.signins = j.signins;
+    render();
+    toast(action === 'signin' ? `Signed in — ${a.slot.headDisplay || 'your head'} has been told` : 'Signed out — thank you for serving!');
+  } catch (x) { if (btn) btn.disabled = false; toast('Couldn\u2019t reach the sheet — try again', true); }
+}
+function boardHTML(s, t = now()) {
+  const people = slotPeople(s); if (!people.length) return '';
+  const rows = people.map((p) => ({ p, c: checkStatus(p, s, t) }));
+  const nIn = rows.filter((x) => x.c.st === 'in').length, nLate = rows.filter((x) => x.c.st === 'late').length, nWait = rows.length - nIn - nLate;
+  const teams = [...new Set(rows.map((x) => x.p.team))];
+  const pill = (x) => {
+    const lbl = x.c.st === 'in' ? `${x.p.name} ${sigTime(x.c.r)}` : x.c.st === 'late' ? `${x.p.name} · late` : x.p.name;
+    const data = state.editing ? ` data-mark='${esc(JSON.stringify({ name: x.p.name, slot: s.label, team: x.p.team, role: x.p.role, isIn: x.c.st === 'in' }))}'` : ' tabindex="-1"';
+    return `<button type="button" class="ck ck-${x.c.st}${isMe(x.p.name) ? ' me' : ''}"${data}>${esc(lbl)}</button>`;
+  };
+  const missing = rows.filter((x) => x.c.st !== 'in').map((x) => `${x.p.name} (${x.p.role})`);
+  return `<section class="board card" aria-label="Check-in for ${esc(s.label)}">
+    <div class="b-top"><span class="kicker">Check-in · ${esc(s.label)}</span><span class="kicker">${hm(t)}</span></div>
+    <div class="b-count"><b>${nIn}</b><span>of ${rows.length} signed in</span></div>
+    <div class="b-bar"><div style="width:${(nIn / rows.length) * 100}%;background:var(--ok)"></div><div style="width:${(nLate / rows.length) * 100}%;background:#F28C28"></div></div>
+    <div class="b-key"><span><i style="background:var(--ok)"></i>In</span><span><i style="background:#F28C28"></i>Late (${nLate})</span><span><i class="dash"></i>Not yet (${nWait})</span></div>
+    ${teams.map((tn) => `<div class="b-team"><div class="b-tn"><span>${esc(tn)}</span><span>${rows.filter((x) => x.p.team === tn && x.c.st === 'in').length} / ${rows.filter((x) => x.p.team === tn).length}</span></div><div class="b-pills">${rows.filter((x) => x.p.team === tn).map(pill).join('')}</div></div>`).join('')}
+    ${missing.length ? `<button type="button" class="btn small" id="copyMissing" data-missing="${esc(`${s.label} — not signed in yet: ${missing.join(', ')}`)}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></svg>Copy missing list for WhatsApp</button>` : '<div class="b-all">Everyone is in. Thank you, team!</div>'}
+    ${state.editing ? '<div class="b-hint">Leader: tap a name to mark them present or not here.</div>' : ''}
+  </section>`;
+}
+function openMark(m) {
+  openSheet(`<h2>${esc(m.name)}</h2><p>${esc(m.slot)} · ${esc(m.team)} · ${esc(m.role)}<br>${m.isIn ? 'Currently signed in.' : 'Not signed in yet.'}</p>
+    <div class="err" id="me2"></div>
+    <div class="row-btns"><button class="btn primary" type="button" id="mkIn">Mark present</button><button class="btn" type="button" id="mkOut">Not here</button><button class="btn ghost" data-close type="button">Cancel</button></div>`, (sh) => {
+    const go = async (value) => {
+      sh.querySelector('#me2').textContent = 'Saving…';
+      try {
+        const j = await api({ action: 'mark', pin: state.leader.pin, editor: state.leader.name, value, name: m.name, slot: m.slot, team: m.team, role: m.role });
+        if (j.signins) state.signins = j.signins;
+        closeSheet(); render(); toast(value === 'in' ? `${m.name} marked present` : `${m.name} marked not here`);
+      } catch (x) { sh.querySelector('#me2').textContent = 'Couldn\u2019t save: ' + x.message; }
+    };
+    sh.querySelector('#mkIn').onclick = () => go('in'); sh.querySelector('#mkOut').onclick = () => go('out');
+  });
+}
+
 /* ---------- programme ---------- */
 const PROG = (() => {
   const P = window.MP_PROGRAMME; if (!P) return null;
@@ -275,6 +345,19 @@ function stageCard(t = now(), compact) {
     ${compact ? '' : ''}</a>`;
 }
 
+function signBlock(a, t) {
+  if (!SIGNIN_ON() || !a || !a.slot) return '';
+  const opens = new Date(+a.from - 30 * 60000);
+  const r = sigOf(state.me, a.slot.label);
+  window.__signA = a;
+  if (r) return `<div class="signed card"><span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>Signed in${sigTime(r) ? ' at ' + sigTime(r) : ''}${r.by && key(r.by) !== key(state.me) ? ' by ' + esc(r.by) : ''}</span>
+    <button type="button" class="btn small" data-sign="signout">Sign out</button></div>`;
+  if (t < opens) return `<div class="sign-later">Sign-in opens at ${hm(opens)}, 30 minutes before your shift.</div>`;
+  if (t >= a.to) return '';
+  return `<button type="button" class="sign-btn" data-sign="signin"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l5 5L20 7"/></svg>I\u2019m here — sign in</button>
+    <div class="sign-later">Your department head is told straight away.</div>`;
+}
+
 /* ---------- chips ---------- */
 function chip(name, role, ref, note, showRole) {
   const cls = roleKind(role);
@@ -287,7 +370,7 @@ function chip(name, role, ref, note, showRole) {
 function cellChips(team, ro, s, t, noRole) {
   const show = !noRole && !isStdRole(ro.role);
   const cell = ro.cells[s.id];
-  const ref = state.editing ? { kind: 'cell', team: team.name, role: ro.role, slot: s.id, row: cell.row, col: cell.col, span: cell.span, value: cell.segs.map((x) => x.name).join(' / ') } : null;
+  const ref = state.editing ? { kind: 'cell', team: team.name, role: ro.role, slot: s.id, slotLabel: s.label, row: cell.row, col: cell.col, span: cell.span, value: cell.segs.map((x) => x.name).join(' / ') } : null;
   const names = namesFor(cell, t);
   if (!names.length) return chip('', ro.role, ref, '', show);
   return names.map((n) => chip(n.name, ro.role, ref, n.note, show)).join('');
@@ -323,6 +406,7 @@ const views = {
           <div class="hero-time">${range(next.from, next.to)}</div>
           <div class="chips"><span class="pill dark">${esc(next.team)}</span><span class="pill outline">${esc(next.role === 'Leader' ? 'On duty' : next.role)}</span></div>
         </section>
+        ${signBlock(next, t)}
         <div class="card people">
           ${next.teamObj && leadCell ? `<div class="row"><span>${esc(next.team)} · ${esc(leadCell ? leadCell.role : 'Lead')}</span><span>${esc(leadCell && next.roles.includes(leadCell.role) ? 'You' : leadNames || 'TBC')}</span></div>` : ''}
           ${mates.length ? `<div class="row"><span>With you</span><span>${esc(mates.join(', '))}</span></div>` : ''}
@@ -376,10 +460,12 @@ const views = {
         <div class="progress" role="progressbar" aria-valuenow="${Math.round(pct)}" aria-valuemin="0" aria-valuemax="100"><div style="width:${pct}%"></div></div>
         <div style="margin-top:6px;font-size:13px;color:var(--muted)">${after ? `Handover to ${esc(after.label)} in ${dur(s.end - t)}` : `Ends in ${dur(s.end - t)}`}</div>
         <div class="duo"><div class="card"><small>Department head</small><b>${esc(s.headDisplay || 'TBC')}</b></div><div class="card"><small>Minister in charge</small><b>${esc(s.minister || 'TBC')}</b></div></div>
+        ${SIGNIN_ON() ? boardHTML(s, t) : ''}
         <div class="section-title"><span class="kicker">On duty by team</span><span class="kicker">Lead · Main · Backup</span></div>
         ${roster(s, true)}`;
     });
-    const nextCard = upcoming ? `<div class="card next-card"><b>Up next:</b> ${esc(upcoming.label)} · ${range(upcoming.start, upcoming.end)} · Dept head ${esc(upcoming.headDisplay || 'TBC')}</div>` : '';
+    const soon = SIGNIN_ON() && upcoming && upcoming.start - t <= 30 * 60000 ? `<div style="height:20px"></div>${boardHTML(upcoming, t)}` : '';
+    const nextCard = soon + (upcoming ? `<div class="card next-card"><b>Up next:</b> ${esc(upcoming.label)} · ${range(upcoming.start, upcoming.end)} · Dept head ${esc(upcoming.headDisplay || 'TBC')}</div>` : '');
     return stageCard(t) + blocks.join('<div style="height:28px"></div>') + nextCard + legend;
   },
 
@@ -434,8 +520,8 @@ const views = {
     const sheetUrl = `https://docs.google.com/spreadsheets/d/${C.SHEET_ID}/edit`;
     const head = m.slots.map((s) => {
       const st = slotState(s, t);
-      const mRef = state.editing && s.ministerRow >= 0 ? esc(JSON.stringify({ kind: 'meta', label: 'Minister in charge', slot: s.id, row: s.ministerRow, col: s.c0, span: s.span, value: s.minister })) : '';
-      const hRef = state.editing && s.headRow >= 0 ? esc(JSON.stringify({ kind: 'meta', label: 'Department head', slot: s.id, row: s.headRow, col: s.c0, span: s.span, value: s.head })) : '';
+      const mRef = state.editing && s.ministerRow >= 0 ? esc(JSON.stringify({ kind: 'meta', label: 'Minister in charge', slot: s.id, slotLabel: s.label, row: s.ministerRow, col: s.c0, span: s.span, value: s.minister })) : '';
+      const hRef = state.editing && s.headRow >= 0 ? esc(JSON.stringify({ kind: 'meta', label: 'Department head', slot: s.id, slotLabel: s.label, row: s.headRow, col: s.c0, span: s.span, value: s.head })) : '';
       const mTxt = state.editing ? `<button type="button" data-edit='${mRef}'>${esc(s.minister || 'Set minister')}</button>` : esc(s.minister || 'TBC');
       const hTxt = state.editing ? `<button type="button" data-edit='${hRef}'>${esc(s.head || 'Set head')}</button>` : esc(s.headDisplay || 'TBC');
       return `<th class="${st === 'now' ? 'now' : ''}" scope="col"><div class="sl">${esc(s.label)}</div><div class="tm">${range(s.start, s.end)}</div>
@@ -449,8 +535,8 @@ const views = {
       let sel = m.slots.find((x) => x.id === state.rotaSlot);
       if (!sel) sel = m.slots.find((x) => slotState(x, t) === 'now' && !/down/i.test(x.label)) || m.slots.find((x) => x.start > t) || m.slots[0];
       const st = slotState(sel, t);
-      const mRef = state.editing && sel.ministerRow >= 0 ? esc(JSON.stringify({ kind: 'meta', label: 'Minister in charge', slot: sel.id, row: sel.ministerRow, col: sel.c0, span: sel.span, value: sel.minister })) : '';
-      const hRef = state.editing && sel.headRow >= 0 ? esc(JSON.stringify({ kind: 'meta', label: 'Department head', slot: sel.id, row: sel.headRow, col: sel.c0, span: sel.span, value: sel.head })) : '';
+      const mRef = state.editing && sel.ministerRow >= 0 ? esc(JSON.stringify({ kind: 'meta', label: 'Minister in charge', slot: sel.id, slotLabel: sel.label, row: sel.ministerRow, col: sel.c0, span: sel.span, value: sel.minister })) : '';
+      const hRef = state.editing && sel.headRow >= 0 ? esc(JSON.stringify({ kind: 'meta', label: 'Department head', slot: sel.id, slotLabel: sel.label, row: sel.headRow, col: sel.c0, span: sel.span, value: sel.head })) : '';
       const tabs = m.slots.map((x) => `<button type="button" class="tchip ${x === sel ? 'on' : ''}" data-rslot="${x.id}" aria-pressed="${x === sel}">${esc(x.label)}${slotState(x, t) === 'now' ? ' <span class="live-dot sm"></span>' : ''}</button>`).join('');
       const teams = m.teams.map((tm) => `<div class="rt-card"><div class="rt-name">${esc(tm.name)}</div>${
         tm.roles.map((ro) => `<div class="tl-line"><span class="role-tag ${roleKind(ro.role)}">${esc(ro.role)}</span><span class="chipset">${cellChips(tm, ro, sel, null, true)}</span></div>`).join('')}</div>`).join('');
@@ -509,6 +595,9 @@ document.addEventListener('click', (e) => {
   if (el.id === 'retry' || el.id === 'syncBtn') return load();
   if (el.id === 'printBtn') return window.print();
   if (el.id === 'leaderBtn') return state.editing ? stopEditing() : startEditing();
+  if (el.dataset.sign) return doSign(el.dataset.sign, window.__signA);
+  if (el.dataset.mark && state.editing) { try { return openMark(JSON.parse(el.dataset.mark)); } catch {} }
+  if (el.id === 'copyMissing') { const txt = el.dataset.missing; (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(() => toast('Copied — paste it in WhatsApp'), () => toast(txt)); return; }
   if (el.dataset.rslot) { state.rotaSlot = el.dataset.rslot; render(); const h = $('.rt-head'); if (h && h.getBoundingClientRect().top < 70) h.scrollIntoView({ block: 'start' }); return; }
   if (el.dataset.team) { state.team = el.dataset.team; store.set('mp_team', state.team); return render(); }
   if (el.dataset.edit && state.editing) { try { return openEditor(JSON.parse(el.dataset.edit)); } catch {} }
@@ -576,6 +665,12 @@ function stopEditing() { state.editing = false; render(); toast('Leader editing 
 async function api(body) {
   if (DEMO) {
     await new Promise((r) => setTimeout(r, 350));
+    if (body.action === 'signin' || body.action === 'signout' || body.action === 'mark') {
+      if (body.action === 'mark' && body.pin !== '2711') throw new Error('Wrong PIN');
+      const status = body.action === 'signout' || body.value === 'out' ? 'out' : 'in';
+      state.signins = state.signins.concat([{ t: hm(now()), name: body.name, slot: body.slot, team: body.team, role: body.role, status, by: body.editor || body.name }]);
+      return { ok: true, signins: state.signins };
+    }
     if (body.pin !== '2711') throw new Error('Wrong PIN');
     if (body.action === 'write') {
       const row = state.demoRows[body.row - 1];
@@ -628,7 +723,8 @@ function openEditor(ref) {
       const err = sh.querySelector('#ee'); err.textContent = 'Saving to sheet…';
       sh.querySelectorAll('button').forEach((b) => (b.disabled = true));
       try {
-        await api({ action: 'write', pin: state.leader.pin, editor: state.leader.name, row: ref.row + 1, col: ref.col + 1, span: ref.span, value });
+        await api({ action: 'write', pin: state.leader.pin, editor: state.leader.name, row: ref.row + 1, col: ref.col + 1, span: ref.span, value,
+          slotLabel: ref.slotLabel, kind: ref.kind, label: ref.label, team: ref.team, role: ref.sheetRole || ref.role });
         closeSheet(); toast(value ? `Saved — ${value}` : 'Cleared'); await load(true);
       } catch (x) {
         sh.querySelectorAll('button').forEach((b) => (b.disabled = false));

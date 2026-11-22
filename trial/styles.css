@@ -301,3 +301,34 @@ table.rota{border-collapse:separate;border-spacing:0;min-width:980px;width:100%;
 .rt-card{padding:12px 14px;border-radius:14px;border:1px solid var(--line);display:flex;flex-direction:column;gap:7px;contain:content}
 .rt-name{font-size:16px;font-weight:800;margin-bottom:2px}
 .rt-card .tl-line .role-tag{max-width:46%}
+
+/* shift sign-in */
+.sign-btn{width:100%;min-height:64px;margin-top:12px;border:0;border-radius:16px;background:#3FB37F;color:#062014;font:800 19px var(--body);display:flex;align-items:center;justify-content:center;gap:10px;box-shadow:0 8px 24px rgba(63,179,127,.25)}
+.sign-btn svg{width:24px;height:24px;stroke-width:2.8}
+.sign-btn:disabled{opacity:.6}
+.sign-later{margin-top:8px;text-align:center;font-size:13px;color:var(--muted)}
+.signed{margin-top:12px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px;background:rgba(63,179,127,.12);border-color:rgba(63,179,127,.6)}
+.signed span{display:flex;align-items:center;gap:8px;font-weight:700;color:#9BE3C0}
+.signed svg{width:20px;height:20px;stroke-width:2.6}
+.board{margin-top:16px;padding:14px 14px 12px;display:flex;flex-direction:column;gap:10px}
+.b-top{display:flex;justify-content:space-between}
+.b-count{display:flex;align-items:baseline;gap:8px}
+.b-count b{font:700 40px/1 var(--display);color:var(--ok)}
+.b-count span{font:500 20px var(--display);color:var(--soft)}
+.b-bar{height:8px;border-radius:4px;background:var(--line);overflow:hidden;display:flex}
+.b-key{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--soft)}
+.b-key span{display:flex;align-items:center;gap:6px}
+.b-key i{width:10px;height:10px;border-radius:3px}
+.b-key i.dash{border:1.5px dashed #5A6A9E}
+.b-team{padding-top:8px;border-top:1px solid var(--line)}
+.b-tn{display:flex;justify-content:space-between;font-size:13px;font-weight:800;margin-bottom:6px}
+.b-tn span:last-child{color:var(--muted);font-weight:600}
+.b-pills{display:flex;flex-wrap:wrap;gap:6px}
+.ck{min-height:32px;padding:0 10px;border-radius:8px;font:600 13px var(--body);border:0}
+.ck-in{background:#3FB37F;color:#062014}
+.ck-late{background:#F28C28;color:#1A0E02}
+.ck-wait{background:transparent;border:1.5px dashed #5A6A9E;color:var(--soft)}
+.ck.me{box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--live)}
+.editing .ck{cursor:pointer}
+.b-all{font-size:14px;font-weight:700;color:#9BE3C0}
+.b-hint{font-size:12px;color:var(--gold2)}

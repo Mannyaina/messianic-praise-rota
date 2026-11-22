@@ -7,6 +7,7 @@ window.MP_CONFIG = {
   // Google Apps Script web-app URL (ends in /exec). When set, the app reads through it
   // and leaders can edit the rota from inside the app. Leave '' for read-only.
   SCRIPT_URL: '',
+  SIGNIN_SHEET: 'Sign-ins',
 
   // The day Set-Up starts. Times before 12:00 in the sheet are treated as the next morning.
   EVENT_DAY: '2026-11-27',
