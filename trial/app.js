@@ -12,7 +12,7 @@ const store = {
 
 /* ---------- time helpers ---------- */
 const params = new URLSearchParams(location.search);
-const DEMO = !!(C.DEMO || params.has('demo'));
+const DEMO = !!C.DEMO;
 const fakeNow = params.get('now') ? new Date(params.get('now')) : null;
 let simNow = fakeNow && !isNaN(fakeNow) ? fakeNow : DEMO ? new Date(C.EVENT_DAY + 'T23:15:00') : null;
 let simStart = Date.now();
@@ -269,13 +269,18 @@ function addNtfy(recs) {
   return true;
 }
 let ntfyKick = null;
+function pollNtfy() {
+  if (!NTFY()) return Promise.resolve();
+  return fetch(`https://ntfy.sh/${encodeURIComponent(C.NTFY_LOG)}/json?poll=1&since=all`, { cache: 'no-store' }).then((r) => r.text()).then((t) => {
+    if (addNtfy(t.split('\n').filter(Boolean).map((l) => { try { const m = JSON.parse(l); return m.event === 'message' ? ntfyRec(m) : null; } catch { return null; } }))) render();
+  }).catch(() => {});
+}
 function startNtfy() {
   if (!NTFY() || es) return;
   const base = `https://ntfy.sh/${encodeURIComponent(C.NTFY_LOG)}`;
-  // first load everything cached, then listen live
-  fetch(`${base}/json?poll=1&since=all`, { cache: 'no-store' }).then((r) => r.text()).then((t) => {
-    if (addNtfy(t.split('\n').filter(Boolean).map((l) => { try { const m = JSON.parse(l); return m.event === 'message' ? ntfyRec(m) : null; } catch { return null; } }))) render();
-  }).catch(() => {});
+  pollNtfy(); // everything already signed in, then listen live
+  setInterval(() => { if (document.visibilityState === 'visible') pollNtfy(); }, 45000);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') pollNtfy(); });
   try {
     es = new EventSource(`${base}/sse?since=1m`);
     es.onmessage = (ev) => { try { const m = JSON.parse(ev.data); if (m.event === 'message' && addNtfy([ntfyRec(m)])) { clearTimeout(ntfyKick); ntfyKick = setTimeout(render, 300); } } catch {} };
@@ -588,7 +593,7 @@ const views = {
       <div class="rota-actions">
         <button class="btn small" type="button" id="findMe"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>${state.me ? 'Highlighting ' + esc(state.me) : 'Find my name'}</button>
         <button class="btn small" type="button" id="printBtn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9V3h12v6M6 18H4v-7h16v7h-2M8 14h8v7H8z"/></svg>Print / PDF</button>
-        <a class="btn small ghost" href="${sheetUrl}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/></svg>Open Google Sheet</a>
+ ${state.editing ? `<a class="btn small ghost" href="${sheetUrl}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/></svg>Open Google Sheet</a>` : ''}
       </div>
       <div class="legend"><span><i style="background:var(--gold)"></i>Lead</span><span><i style="background:#fff"></i>Main</span><span><i style="border:1.5px solid #5A6A9E"></i>Backup</span><span><i style="background:#1F3170;outline:2px solid var(--gold)"></i>On now</span></div>
       ${wide ? `<div class="rota-wrap"><table class="rota"><thead><tr><th class="team" scope="col">Team</th>${head}</tr></thead><tbody>${body}</tbody></table></div>` : body2}`;
@@ -880,7 +885,7 @@ function runSplash(done) {
     if (pull <= TRIGGER) { ptr.classList.add('ease'); set(0); setTimeout(() => ptr.classList.remove('ease'), 250); pull = 0; return; }
     busy = true; ptr.classList.add('ease', 'spin'); set(64); lbl.textContent = 'Checking the sheet…';
     if (navigator.vibrate) try { navigator.vibrate(10); } catch {}
-    await Promise.all([load(), new Promise((r) => setTimeout(r, 600))]);
+    await Promise.all([load(), pollNtfy(), new Promise((r) => setTimeout(r, 600))]);
     lbl.textContent = state.error ? 'Couldn\u2019t reach the sheet' : 'Up to date';
     setTimeout(() => { ptr.classList.remove('spin'); set(0); setTimeout(() => { ptr.classList.remove('ease'); busy = false; }, 260); }, 550);
     pull = 0;
