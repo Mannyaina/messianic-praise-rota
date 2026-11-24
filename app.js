@@ -1071,14 +1071,20 @@ let lastScroll = 0; window.addEventListener('scroll', () => { lastScroll = Date.
 setInterval(() => { setSync(); if (document.visibilityState === 'visible' && !$('#sheet').innerHTML && Date.now() - lastScroll > 4000 && (tab === 'now' || tab === 'me' || tab === 'prog')) render(); }, 30000);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') load(true); });
 if ('serviceWorker' in navigator) {
-  let reloaded = false, reg = null; const hadController = !!navigator.serviceWorker.controller; // first visit: don't reload
-  // a new version has arrived: switch to it straight away (unless someone is mid-way through a form)
-  const apply = () => { if (!hadController || reloaded) return; if (!$('#sheet').hidden) return setTimeout(apply, 3000); reloaded = true; location.reload(); };
-  navigator.serviceWorker.addEventListener('controllerchange', apply);
+  // One background helper only. If the notification service has already registered it (with its own settings),
+  // reuse that registration instead of replacing it — replacing it each time caused a reload loop.
+  // Updates are picked up on the next open (the page itself is always fetched fresh), so no forced reloads.
+  let reg = null;
   const check = () => { if (reg) reg.update().catch(() => {}); };
-  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((r) => { reg = r; check(); }).catch(() => {}));
-  // phones often just resume the app rather than restart it, so check whenever it comes back on screen, and every few minutes
+  window.addEventListener('load', async () => {
+    try {
+      const existing = await navigator.serviceWorker.getRegistration();
+      const url = existing && (existing.active || existing.waiting || existing.installing);
+      reg = url && /\/sw\.js/.test(url.scriptURL) ? existing : await navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' });
+      check();
+    } catch {}
+  });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
-  setInterval(check, 3 * 60 * 1000);
+  setInterval(check, 5 * 60 * 1000);
 }
 })();
