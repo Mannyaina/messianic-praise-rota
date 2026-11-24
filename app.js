@@ -1071,12 +1071,14 @@ let lastScroll = 0; window.addEventListener('scroll', () => { lastScroll = Date.
 setInterval(() => { setSync(); if (document.visibilityState === 'visible' && !$('#sheet').innerHTML && Date.now() - lastScroll > 4000 && (tab === 'now' || tab === 'me' || tab === 'prog')) render(); }, 30000);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') load(true); });
 if ('serviceWorker' in navigator) {
-  const opened = Date.now(); let reloaded = false; const hadController = !!navigator.serviceWorker.controller; // first visit: don't reload
-  // a new version just took over within seconds of opening: switch to it now rather than next time
-  navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (!hadController || reloaded || Date.now() - opened > 15000 || !$('#sheet').hidden) return;
-    reloaded = true; location.reload();
-  });
-  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => reg.update()).catch(() => {}));
+  let reloaded = false, reg = null; const hadController = !!navigator.serviceWorker.controller; // first visit: don't reload
+  // a new version has arrived: switch to it straight away (unless someone is mid-way through a form)
+  const apply = () => { if (!hadController || reloaded) return; if (!$('#sheet').hidden) return setTimeout(apply, 3000); reloaded = true; location.reload(); };
+  navigator.serviceWorker.addEventListener('controllerchange', apply);
+  const check = () => { if (reg) reg.update().catch(() => {}); };
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((r) => { reg = r; check(); }).catch(() => {}));
+  // phones often just resume the app rather than restart it, so check whenever it comes back on screen, and every few minutes
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
+  setInterval(check, 3 * 60 * 1000);
 }
 })();
