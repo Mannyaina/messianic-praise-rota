@@ -732,7 +732,6 @@ const views = {
       <div class="h-display" style="color:var(--gold);margin-top:4px">Full media rota</div>
       <div class="rota-actions">
         <button class="btn small" type="button" id="findMe"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>${state.me ? 'Highlighting ' + esc(state.me) : 'Find my name'}</button>
-        <button class="btn small" type="button" id="printBtn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9V3h12v6M6 18H4v-7h16v7h-2M8 14h8v7H8z"/></svg>Print / PDF</button>
  ${state.editing ? `<a class="btn small ghost" href="${sheetUrl}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/></svg>Open Google Sheet</a>` : ''}
       </div>
       <div class="legend"><span><i style="background:var(--gold)"></i>Lead</span><span><i style="background:#fff"></i>Main</span><span><i style="border:1.5px solid #5A6A9E"></i>Backup</span><span><i style="background:#1F3170;outline:2px solid var(--gold)"></i>On now</span></div>
@@ -773,7 +772,6 @@ document.addEventListener('click', (e) => {
   if (!el) return;
   if (el.id === 'pickMe' || el.id === 'findMe') return pickName();
   if (el.id === 'retry' || el.id === 'syncBtn') return load();
-  if (el.id === 'printBtn') return window.print();
   if (el.id === 'leaderBtn') return state.editing ? stopEditing() : startEditing();
   if (el.id === 'pushOffLink') return disablePush();
   if (el.id === 'remOn') return enableReminders();
@@ -893,7 +891,7 @@ async function api(body) {
 function startEditing() {
   if (!C.SCRIPT_URL && !DEMO && !NTFY()) {
     return openSheet(`<h2>Leader editing</h2><p>In-app editing isn’t switched on yet. Until it is, leaders can edit the Google Sheet directly. The app picks up changes within ${C.REFRESH_SECONDS} seconds.</p>
-      <div class="row-btns"><a class="btn primary" href="https://docs.google.com/spreadsheets/d/${C.SHEET_ID}/edit" target="_blank" rel="noopener">Open Google Sheet</a><button class="btn" data-close type="button">Close</button></div>`);
+      <div class="row-btns"><button class="btn" data-close type="button">Close</button></div>`);
   }
   if (state.model && !state.model.editable && !NTFY()) return toast('Reconnecting to the sheet — try again in a moment', true);
   if (state.leader && state.leader.pin) {
