@@ -88,6 +88,15 @@ function shiftChecks_(now) {
       const n = s.people.filter((p) => isIn(p.name, s.label)).length;
       send_(`${s.label} starts at ${hm_(s.start)}`, `${n} of ${s.people.length} signed in so far · Head: ${s.head || 'TBC'}`);
     }
+    // personal reminders for volunteers who turned them on (tag person = their name)
+    if (mins >= -30 && mins < -20 && !props.getProperty('rem_' + s.label)) {
+      props.setProperty('rem_' + s.label, '1');
+      s.people.forEach((p) => sendTo_(p.name, `Your shift starts at ${hm_(s.start)}`, `${s.label} · ${p.team} · ${p.role}. Tap to sign in when you arrive.`));
+    }
+    if (mins >= 5 && mins < 15 && !props.getProperty('nudge_' + s.label)) {
+      props.setProperty('nudge_' + s.label, '1');
+      s.people.filter((p) => !isIn(p.name, s.label)).forEach((p) => sendTo_(p.name, `Don't forget to sign in`, `${s.label} started at ${hm_(s.start)} · ${p.role}. Tap to sign in.`));
+    }
     if (mins >= LATE_AFTER_MIN && mins < LATE_AFTER_MIN + 20 && !props.getProperty('miss_' + s.label)) {
       props.setProperty('miss_' + s.label, '1');
       const miss = s.people.filter((p) => !isIn(p.name, s.label));
@@ -126,6 +135,22 @@ function send_(title, body) {
   if (res.getResponseCode() >= 300) console.warn(res.getContentText());
 }
 
+/* push to one volunteer (tag person = their name, lower case) */
+function sendTo_(name, title, body) {
+  const key = PropertiesService.getScriptProperties().getProperty('ONESIGNAL_KEY');
+  if (!key) return;
+  const person = String(name).toLowerCase().replace(/\s+/g, ' ').trim();
+  UrlFetchApp.fetch('https://api.onesignal.com/notifications', {
+    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    headers: { Authorization: 'Key ' + key },
+    payload: JSON.stringify({
+      app_id: ONESIGNAL_APP_ID, target_channel: 'push',
+      filters: [{ field: 'tag', key: 'person', relation: '=', value: person }],
+      headings: { en: title }, contents: { en: body }, url: APP_URL.replace('#now', '#me')
+    })
+  });
+}
+
 /* ---------- rota reader (same rules as the app) ---------- */
 function parseRota_() {
   const ss = SpreadsheetApp.openById(SHEET_ID);
@@ -156,7 +181,9 @@ function parseRota_() {
     if (!role || !team) continue;
     slots.forEach((s) => {
       for (let c = s.c0; c <= s.c1; c++) split(v(r, c)).forEach((name) => {
-        if (!s.people.some((p) => p.name.toLowerCase() === name.toLowerCase())) s.people.push({ name, team, role });
+        const ex = s.people.find((p) => p.name.toLowerCase() === name.toLowerCase());
+        if (!ex) s.people.push({ name, team, role });
+        else if (ex.team === team && ex.role.split(', ').indexOf(role) < 0) ex.role += ', ' + role;
       });
     });
   }

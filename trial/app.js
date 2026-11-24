@@ -324,28 +324,47 @@ function loadOneSignal() {
   return osReady;
 }
 const pushOn = () => store.get('mp_push', false);
+const remindOn = () => store.get('mp_remind', false);
+function needHomeScreen() {
+  return openSheet(`<h2>Add the app first</h2><p>On iPhone, notifications only work from the app on your home screen.</p>
+      <ol class="steps"><li>Open this page in <b>Safari</b> and tap <b>Share</b> <svg class="ios-share" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M8 7l4-4 4 4M5 12v8h14v-8"/></svg></li>
+      <li>Tap <b>Add to Home Screen</b>, then <b>Add</b>.</li><li>Open the app from your home screen and tap the button again.</li></ol>
+      <div class="row-btns"><button class="btn primary" data-close type="button">Got it</button></div>`);
+}
+async function subscribe(tags) {
+  if (!('Notification' in window)) { toast('This phone can\u2019t show notifications from web apps — try updating it', true); return false; }
+  toast('Asking your phone for permission…');
+  const OS = await loadOneSignal();
+  await OS.Notifications.requestPermission();
+  if (!OS.Notifications.permission) { toast('Notifications not allowed — turn them on for this app in Settings', true); return false; }
+  await OS.User.PushSubscription.optIn();
+  await OS.User.addTags(tags);
+  return true;
+}
+async function enableReminders() {
+  if (!C.ONESIGNAL_APP_ID || !state.me) return;
+  if (isIOS && !isStandalone()) return needHomeScreen();
+  try {
+    if (!(await subscribe({ person: key(state.me) }))) return;
+    store.set('mp_remind', true); render();
+    showAlert('Shift reminders are on', `We\u2019ll remind ${state.me} 30 minutes before each shift`, 'ok');
+  } catch (e) { console.warn(e); toast('Couldn\u2019t turn on reminders: ' + (e.message || e), true); }
+}
+async function disableReminders() {
+  try { const OS = await loadOneSignal(); await OS.User.removeTag('person'); if (!pushOn()) await OS.User.PushSubscription.optOut(); } catch {}
+  store.set('mp_remind', false); render(); toast('Shift reminders off');
+}
 async function enablePush() {
   if (!C.ONESIGNAL_APP_ID) return;
-  if (isIOS && !isStandalone()) {
-    return openSheet(`<h2>Add the app first</h2><p>On iPhone, lock-screen alerts only work from the app on your home screen.</p>
-      <ol class="steps"><li>Open this page in <b>Safari</b> and tap <b>Share</b> <svg class="ios-share" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M8 7l4-4 4 4M5 12v8h14v-8"/></svg></li>
-      <li>Tap <b>Add to Home Screen</b>, then <b>Add</b>.</li><li>Open the app from your home screen, unlock leader mode, and tap <b>Lock-screen alerts</b> again.</li></ol>
-      <div class="row-btns"><button class="btn primary" data-close type="button">Got it</button></div>`);
-  }
-  if (!('Notification' in window)) return toast('This phone can\u2019t show alerts from web apps — update it or use another phone', true);
+  if (isIOS && !isStandalone()) return needHomeScreen();
   try {
-    toast('Asking your phone for permission…');
-    const OS = await loadOneSignal();
-    await OS.Notifications.requestPermission();
-    if (!OS.Notifications.permission) { return toast('Alerts not allowed — turn on notifications for this app in Settings', true); }
-    await OS.User.PushSubscription.optIn();
-    await OS.User.addTags({ leader: '1', name: (state.leader && state.leader.name) || '' });
+    if (!(await subscribe({ leader: '1', name: (state.leader && state.leader.name) || '' }))) return;
     store.set('mp_push', true); renderLeaderBar();
     showAlert('Lock-screen alerts are on', 'You\u2019ll get sign-in alerts even when your phone is locked', 'ok');
   } catch (e) { console.warn(e); toast('Couldn\u2019t turn on alerts: ' + (e.message || e), true); }
 }
 async function disablePush() {
-  try { const OS = await loadOneSignal(); await OS.User.removeTag('leader'); await OS.User.PushSubscription.optOut(); } catch {}
+  try { const OS = await loadOneSignal(); await OS.User.removeTag('leader'); if (!remindOn()) await OS.User.PushSubscription.optOut(); } catch {}
   store.set('mp_push', false); renderLeaderBar(); toast('Lock-screen alerts off');
 }
 
@@ -581,7 +600,10 @@ const views = {
         <div class="mid"><b>${range(a.from, a.to)}</b><small>${esc(a.team)} · ${esc(a.role)}</small></div>
         <span class="state st-${st}">${word}</span></div>`;
     }).join('');
-    return who + hero + `<div class="section-title"><span class="kicker">All my shifts</span><span class="kicker">${mine.length}</span></div><div class="shift-list">${list}</div>`;
+    const remind = C.ONESIGNAL_APP_ID ? (remindOn()
+      ? `<div class="remind card on"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg>Shift reminders on</span><button type="button" class="btn small ghost" id="remOff">Turn off</button></div>`
+      : `<button type="button" class="remind-btn" id="remOn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg><span><b>Remind me before my shifts</b><small>A notification 30 minutes before each one</small></span></button>`) : '';
+    return who + hero + remind + `<div class="section-title"><span class="kicker">All my shifts</span><span class="kicker">${mine.length}</span></div><div class="shift-list">${list}</div>`;
   },
 
   now() {
@@ -753,6 +775,8 @@ document.addEventListener('click', (e) => {
   if (el.id === 'retry' || el.id === 'syncBtn') return load();
   if (el.id === 'printBtn') return window.print();
   if (el.id === 'leaderBtn') return state.editing ? stopEditing() : startEditing();
+  if (el.id === 'remOn') return enableReminders();
+  if (el.id === 'remOff') return disableReminders();
   if (el.dataset.sign) return doSign(el.dataset.sign, window.__signA);
   if (el.dataset.mark && state.editing) { try { return openMark(JSON.parse(el.dataset.mark)); } catch {} }
   if (el.id === 'copyMissing') { const txt = el.dataset.missing; (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(() => toast('Copied — paste it in WhatsApp'), () => toast(txt)); return; }
@@ -786,7 +810,7 @@ function pickName() {
     sh.querySelector('#q').addEventListener('input', (e) => { sh.querySelector('#nl').innerHTML = list(e.target.value); });
     sh.addEventListener('click', (e) => {
       const b = e.target.closest('[data-name]');
-      if (b) { state.me = b.dataset.name; store.set('mp_me', state.me); closeSheet(); if (tab !== 'rota') location.hash = '#me'; render(); toast('Showing shifts for ' + state.me); }
+      if (b) { state.me = b.dataset.name; store.set('mp_me', state.me); if (remindOn()) loadOneSignal().then((OS) => OS.User.addTags({ person: key(state.me) })).catch(() => {}); closeSheet(); if (tab !== 'rota') location.hash = '#me'; render(); toast('Showing shifts for ' + state.me); }
       if (e.target.id === 'clearMe') { state.me = ''; store.del('mp_me'); closeSheet(); render(); }
     });
   });
@@ -1021,7 +1045,7 @@ function runSplash(done) {
 })();
 
 /* ---------- boot ---------- */
-if (pushOn() && C.ONESIGNAL_APP_ID) setTimeout(() => loadOneSignal().catch(() => {}), 3000);
+if ((pushOn() || remindOn()) && C.ONESIGNAL_APP_ID) setTimeout(() => loadOneSignal().catch(() => {}), 3000);
 startNtfy();
 runSplash(() => { render(); setSync(); showInstall(); });
 load(true);

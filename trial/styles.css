@@ -349,3 +349,12 @@ table.rota{border-collapse:separate;border-spacing:0;min-width:980px;width:100%;
 .a-tx b{font-size:15px}
 .a-tx span{font-size:13px;color:#DCE2F5;line-height:1.35}
 .leader-bar{flex-wrap:wrap}
+
+/* shift reminders */
+.remind-btn{width:100%;margin-top:12px;padding:12px 14px;border-radius:14px;border:1px dashed #5A6A9E;background:transparent;display:flex;align-items:center;gap:12px;text-align:left;color:#fff}
+.remind-btn svg,.remind svg{width:22px;height:22px;color:var(--gold);flex-shrink:0}
+.remind-btn span{display:flex;flex-direction:column;gap:2px}
+.remind-btn b{font-size:15px}
+.remind-btn small{font-size:12px;color:var(--muted)}
+.remind{margin-top:12px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.remind span{display:flex;align-items:center;gap:8px;font-weight:700;color:var(--gold2)}
