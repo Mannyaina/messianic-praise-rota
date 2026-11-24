@@ -575,7 +575,7 @@ const views = {
       const s = next.slot;
       const leadCell = next.teamObj ? next.teamObj.roles.find((r) => roleKind(r.role) === 'lead') : null;
       const leadNames = leadCell ? namesFor(leadCell.cells[s.id], live ? t : null).map((n) => n.name).join(', ') : '';
-      const mates = next.teamObj ? next.teamObj.roles.filter((r) => !next.roles.includes(r.role)).flatMap((r) => namesFor(r.cells[s.id]).filter((n) => !isMe(n.name)).map((n) => `${n.name} (${r.role})`)) : [];
+      const mates = next.teamObj ? next.teamObj.roles.filter((r) => !next.roles.includes(r.role)).flatMap((r) => namesFor(r.cells[s.id]).filter((n) => !isMe(n.name)).map((n) => n.name)).filter((n, i, all) => all.indexOf(n) === i) : [];
       hero = `<section class="hero ${live ? 'live' : ''}">
           <div class="kicker">${live ? 'You’re on now' : 'Your next shift'}</div>
           <div class="hero-top"><div class="h-display">${esc(s.label)}</div>
@@ -586,7 +586,7 @@ const views = {
         ${signBlock(next, t)}
         <div class="card people">
           ${next.teamObj && leadCell ? `<div class="row"><span>${esc(next.team)} · ${esc(leadCell ? leadCell.role : 'Lead')}</span><span>${esc(leadCell && next.roles.includes(leadCell.role) ? 'You' : leadNames || 'TBC')}</span></div>` : ''}
-          ${mates.length ? `<div class="row"><span>With you</span><span>${esc(mates.join(', '))}</span></div>` : ''}
+          ${mates.length ? `<div class="row"><span>With you</span><span>${esc(mates.slice(0, 4).join(', ') + (mates.length > 4 ? ` and ${mates.length - 4} more` : ''))}</span></div>` : ''}
           <div class="row"><span>Department head</span><span>${esc(s.headDisplay || 'TBC')}</span></div>
           <div class="row"><span>Minister in charge</span><span>${esc(s.minister || 'TBC')}</span></div>
         </div>`;
