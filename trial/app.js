@@ -266,13 +266,78 @@ function addNtfy(recs) {
   const fresh = recs.filter((r) => r && !ids.has(r.id));
   if (!fresh.length) return false;
   state.signins = state.signins.concat(fresh).sort((a, b) => (a.ts || 0) - (b.ts || 0));
+  if (ntfyReady) leaderAlert(fresh);
   return true;
+}
+let ntfyReady = false;
+
+/* ---------- in-app alerts for leaders (sound + vibration + banner while the app is open) ---------- */
+const alertsOn = () => !!state.leader && store.get('mp_alerts', true);
+let actx = null;
+document.addEventListener('click', () => { try { if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)(); if (actx.state === 'suspended') actx.resume(); } catch {} }, { capture: true });
+function chime(kind) {
+  try {
+    if (!actx) return;
+    const notes = kind === 'warn' ? [740, 554] : kind === 'info' ? [659, 880] : [880, 1175];
+    notes.forEach((f, i) => {
+      const o = actx.createOscillator(), g = actx.createGain(), t0 = actx.currentTime + i * 0.16;
+      o.type = 'sine'; o.frequency.value = f; o.connect(g); g.connect(actx.destination);
+      g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.25, t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.35);
+      o.start(t0); o.stop(t0 + 0.4);
+    });
+  } catch {}
+}
+function showAlert(title, body, kind) {
+  const box = $('#alerts'); if (!box) return;
+  const el = document.createElement('button');
+  el.type = 'button'; el.className = 'alert a-' + (kind || 'ok');
+  el.innerHTML = `<span class="a-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${kind === 'warn' ? 'M12 8v5M12 17h.01M10.3 3.9L2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z' : kind === 'info' ? 'M12 7v5l3 2M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z' : 'M5 12l5 5L20 7'}"/></svg></span>
+    <span class="a-tx"><b>${esc(title)}</b><span>${esc(body)}</span></span>`;
+  el.onclick = () => { el.remove(); location.hash = '#now'; };
+  box.prepend(el);
+  while (box.children.length > 3) box.lastChild.remove();
+  setTimeout(() => { el.classList.add('gone'); setTimeout(() => el.remove(), 400); }, kind === 'warn' ? 12000 : 7000);
+  chime(kind);
+  if (navigator.vibrate) try { navigator.vibrate(kind === 'warn' ? [120, 60, 120, 60, 120] : [80, 40, 80]); } catch {}
+}
+function leaderAlert(recs) {
+  if (!alertsOn() || document.hidden) return;
+  const others = recs.filter((r) => key(r.by) !== key(state.leader.name) && key(r.name) !== key(state.leader.name));
+  if (!others.length) return;
+  if (others.length > 3) {
+    const ins = others.filter((r) => r.status === 'in');
+    return showAlert(`${others.length} check-in updates`, ins.map((r) => r.name).join(', ') || 'Open Live now to see who', 'ok');
+  }
+  for (const r of others) {
+    const marked = key(r.by) !== key(r.name);
+    if (r.status === 'in') showAlert(marked ? `${r.name} marked present` : `${r.name} signed in`, `${r.slot} · ${r.role || r.team}${marked ? ' · by ' + r.by : ''}`, 'ok');
+    else showAlert(marked ? `${r.name} marked not here` : `${r.name} signed out`, `${r.slot} · ${r.team}`, 'info');
+  }
+}
+function shiftAlerts() {
+  if (!alertsOn() || document.hidden || !state.model || !SIGNIN_ON()) return;
+  const t = now();
+  for (const s of state.model.slots) {
+    const ppl = slotPeople(s); if (!ppl.length) continue;
+    const mins = (t - s.start) / 60000;
+    const seen = (k) => { try { if (sessionStorage.getItem(k)) return true; sessionStorage.setItem(k, '1'); } catch {} return false; };
+    if (mins >= -15 && mins < 0 && !seen('al_pre_' + s.label)) {
+      const n = ppl.filter((p) => checkStatus(p, s, t).st === 'in').length;
+      showAlert(`${s.label} starts at ${hm(s.start)}`, `${n} of ${ppl.length} signed in so far`, 'info');
+    }
+    if (mins >= 10 && mins < 30 && !seen('al_miss_' + s.label)) {
+      const miss = ppl.filter((p) => checkStatus(p, s, t).st !== 'in');
+      if (miss.length) showAlert(`${s.label} · ${miss.length} not signed in`, miss.slice(0, 8).map((p) => p.name).join(', ') + (miss.length > 8 ? ` and ${miss.length - 8} more` : ''), 'warn');
+      else showAlert(`${s.label} · everyone is in`, `All ${ppl.length} signed in`, 'ok');
+    }
+  }
 }
 let ntfyKick = null;
 function pollNtfy() {
   if (!NTFY()) return Promise.resolve();
   return fetch(`https://ntfy.sh/${encodeURIComponent(C.NTFY_LOG)}/json?poll=1&since=all`, { cache: 'no-store' }).then((r) => r.text()).then((t) => {
     if (addNtfy(t.split('\n').filter(Boolean).map((l) => { try { const m = JSON.parse(l); return m.event === 'message' ? ntfyRec(m) : null; } catch { return null; } }))) render();
+    ntfyReady = true;
   }).catch(() => {});
 }
 function startNtfy() {
@@ -699,9 +764,11 @@ function renderLeaderBar() {
   if (!state.editing) { bar.hidden = true; return; }
   bar.hidden = false;
   bar.innerHTML = `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>
-    <div class="grow"><b>Leader editing on</b> (${esc(state.leader?.name || '')}). ${NTFY() ? 'On Live now, tap a name on the check-in board to mark them present.' : 'Tap any name in Teams or Full rota to change it.'}</div>
+    <div class="grow"><b>Leader mode</b> (${esc(state.leader?.name || '')}). ${NTFY() ? 'On Live now, tap a name on the check-in board to mark them present.' : 'Tap any name in Teams or Full rota to change it.'}</div>
+    <button class="btn small" type="button" id="alertTgl" aria-pressed="${alertsOn()}">${alertsOn() ? 'Alerts on' : 'Alerts off'}</button>
     <button class="btn small" type="button" id="leaderBtnOff">Done</button>`;
   bar.querySelector('#leaderBtnOff').onclick = stopEditing;
+  bar.querySelector('#alertTgl').onclick = () => { const on = !alertsOn(); store.set('mp_alerts', on); renderLeaderBar(); if (on) showAlert('Alerts are on', 'You\u2019ll hear and see each sign-in while the app is open', 'ok'); else toast('Alerts off'); };
 }
 function stopEditing() { state.editing = false; render(); toast('Leader editing off'); }
 
@@ -906,6 +973,7 @@ startNtfy();
 runSplash(() => { render(); setSync(); showInstall(); });
 load(true);
 setInterval(() => { if (document.visibilityState === 'visible') load(true); }, C.REFRESH_SECONDS * 1000);
+setInterval(shiftAlerts, 30000); setTimeout(shiftAlerts, 4000);
 let lastScroll = 0; window.addEventListener('scroll', () => { lastScroll = Date.now(); }, { passive: true });
 setInterval(() => { setSync(); if (document.visibilityState === 'visible' && !$('#sheet').innerHTML && Date.now() - lastScroll > 4000 && (tab === 'now' || tab === 'me' || tab === 'prog')) render(); }, 30000);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') load(true); });
