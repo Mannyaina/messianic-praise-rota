@@ -601,8 +601,8 @@ const views = {
         <span class="state st-${st}">${word}</span></div>`;
     }).join('');
     const remind = C.ONESIGNAL_APP_ID ? (remindOn()
-      ? `<div class="remind card on"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg>Shift reminders on</span><button type="button" class="btn small ghost" id="remOff">Turn off</button></div>`
-      : `<button type="button" class="remind-btn" id="remOn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg><span><b>Remind me before my shifts</b><small>A notification 30 minutes before each one</small></span></button>`) : '';
+      ? `<div class="remind card on"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg>Shift reminders on</span></div>`
+      : `<button type="button" class="remind-btn" id="remOn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg><span><b>Turn on shift reminders</b><small>Required for the media team · a notification 30 minutes before each shift</small></span></button>`) : '';
     return who + hero + remind + `<div class="section-title"><span class="kicker">All my shifts</span><span class="kicker">${mine.length}</span></div><div class="shift-list">${list}</div>`;
   },
 
@@ -777,7 +777,6 @@ document.addEventListener('click', (e) => {
   if (el.id === 'leaderBtn') return state.editing ? stopEditing() : startEditing();
   if (el.id === 'pushOffLink') return disablePush();
   if (el.id === 'remOn') return enableReminders();
-  if (el.id === 'remOff') return disableReminders();
   if (el.dataset.sign) return doSign(el.dataset.sign, window.__signA);
   if (el.dataset.mark && state.editing) { try { return openMark(JSON.parse(el.dataset.mark)); } catch {} }
   if (el.id === 'copyMissing') { const txt = el.dataset.missing; (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(() => toast('Copied — paste it in WhatsApp'), () => toast(txt)); return; }
@@ -811,7 +810,9 @@ function pickName() {
     sh.querySelector('#q').addEventListener('input', (e) => { sh.querySelector('#nl').innerHTML = list(e.target.value); });
     sh.addEventListener('click', (e) => {
       const b = e.target.closest('[data-name]');
-      if (b) { state.me = b.dataset.name; store.set('mp_me', state.me); if (remindOn()) loadOneSignal().then((OS) => OS.User.addTags({ person: key(state.me) })).catch(() => {}); closeSheet(); if (tab !== 'rota') location.hash = '#me'; render(); toast('Showing shifts for ' + state.me); }
+      if (b) { state.me = b.dataset.name; store.set('mp_me', state.me);
+        if (remindOn()) loadOneSignal().then((OS) => OS.User.addTags({ person: key(state.me) })).catch(() => {});
+        else if (C.ONESIGNAL_APP_ID && !(isIOS && !isStandalone()) && 'Notification' in window && Notification.permission !== 'denied') setTimeout(enableReminders, 400); closeSheet(); if (tab !== 'rota') location.hash = '#me'; render(); toast('Showing shifts for ' + state.me); }
       if (e.target.id === 'clearMe') { state.me = ''; store.del('mp_me'); closeSheet(); render(); }
     });
   });
@@ -1061,6 +1062,7 @@ if (state.leader && state.leader.pin && store.get('mp_editing', false)) {
     toast('The leader PIN has changed — tap the padlock to sign in again', true);
   });
 }
+if (C.ONESIGNAL_APP_ID && state.me && !remindOn() && 'Notification' in window && Notification.permission === 'granted') setTimeout(() => enableReminders(), 3500);
 if ((pushOn() || remindOn()) && C.ONESIGNAL_APP_ID) setTimeout(() => loadOneSignal().catch(() => {}), 3000);
 startNtfy();
 runSplash(() => { render(); setSync(); showInstall(); });

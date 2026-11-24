@@ -351,7 +351,7 @@ table.rota{border-collapse:separate;border-spacing:0;min-width:980px;width:100%;
 .leader-bar{flex-wrap:wrap}
 
 /* shift reminders */
-.remind-btn{width:100%;margin-top:12px;padding:12px 14px;border-radius:14px;border:1px dashed #5A6A9E;background:transparent;display:flex;align-items:center;gap:12px;text-align:left;color:#fff}
+.remind-btn{width:100%;margin-top:12px;padding:12px 14px;border-radius:14px;border:1.5px solid var(--gold);background:rgba(232,190,74,.1);display:flex;align-items:center;gap:12px;text-align:left;color:#fff}
 .remind-btn svg,.remind svg{width:22px;height:22px;color:var(--gold);flex-shrink:0}
 .remind-btn span{display:flex;flex-direction:column;gap:2px}
 .remind-btn b{font-size:15px}
