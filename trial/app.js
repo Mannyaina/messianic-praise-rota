@@ -331,24 +331,34 @@ function needHomeScreen() {
       <li>Tap <b>Add to Home Screen</b>, then <b>Add</b>.</li><li>Open the app from your home screen and tap the button again.</li></ol>
       <div class="row-btns"><button class="btn primary" data-close type="button">Got it</button></div>`);
 }
-async function subscribe(tags) {
-  if (!('Notification' in window)) { toast('This phone can\u2019t show notifications from web apps — try updating it', true); return false; }
-  toast('Asking your phone for permission…');
-  const OS = await loadOneSignal();
-  await OS.Notifications.requestPermission();
-  if (!OS.Notifications.permission) { toast('Notifications not allowed — turn them on for this app in Settings', true); return false; }
+async function subscribe(tags, silent) {
+  if (!('Notification' in window)) { if (!silent) toast('This phone can\u2019t show notifications from web apps — try updating it', true); return false; }
+  // ask straight away, inside the tap — iPhone ignores permission requests made after a delay
+  let ask = Promise.resolve(Notification.permission);
+  if (Notification.permission === 'default') { try { ask = Promise.resolve(Notification.requestPermission()); } catch { ask = Promise.resolve('default'); } }
+  if (!silent) toast('Asking your phone for permission…');
+  const [perm, OS] = await Promise.all([ask.catch(() => 'default'), loadOneSignal()]);
+  if (perm !== 'granted' && Notification.permission !== 'granted') {
+    if (!silent) toast(perm === 'denied' ? 'Notifications are blocked — turn them on for this app in Settings' : 'Notifications not allowed yet — tap the button to try again', true);
+    return false;
+  }
   await OS.User.PushSubscription.optIn();
   await OS.User.addTags(tags);
   return true;
 }
-async function enableReminders() {
-  if (!C.ONESIGNAL_APP_ID || !state.me) return;
-  if (isIOS && !isStandalone()) return needHomeScreen();
+let remBusy = false;
+async function enableReminders(silent) {
+  silent = silent === true;
+  if (!C.ONESIGNAL_APP_ID || !state.me || remBusy) return;
+  if (isIOS && !isStandalone()) return silent ? undefined : needHomeScreen();
+  remBusy = true;
   try {
-    if (!(await subscribe({ person: key(state.me) }))) return;
+    if (!(await subscribe({ person: key(state.me) }, silent))) return;
+    const was = remindOn();
     store.set('mp_remind', true); render();
-    showAlert('Shift reminders are on', `We\u2019ll remind ${state.me} 30 minutes before each shift`, 'ok');
-  } catch (e) { console.warn(e); toast('Couldn\u2019t turn on reminders: ' + (e.message || e), true); }
+    if (!silent || !was) showAlert('Shift reminders are on', `We\u2019ll remind ${state.me} 30 minutes before each shift`, 'ok');
+  } catch (e) { console.warn(e); if (!silent) toast('Couldn\u2019t turn on reminders: ' + (e.message || e), true); }
+  finally { remBusy = false; }
 }
 async function disableReminders() {
   try { const OS = await loadOneSignal(); await OS.User.removeTag('person'); if (!pushOn()) await OS.User.PushSubscription.optOut(); } catch {}
@@ -446,14 +456,14 @@ function checkStatus(p, s, t = now()) {
   if (r) return { st: 'in', r };
   return { st: t >= new Date(+s.start + 10 * 60000) ? 'late' : 'wait' };
 }
-async function doSign(action, a) {
-  const btn = document.querySelector('[data-sign]'); if (btn) btn.disabled = true;
+async function doSign(action, a, btn) {
+  if (btn) { if (btn.disabled) return; btn.disabled = true; }
   try {
     const j = await api({ action, name: state.me, slot: a.slot.label, team: a.team, role: a.role });
     if (j.signins) state.signins = j.signins;
     render();
     toast(action === 'signin' ? `Signed in — ${a.slot.headDisplay || 'your head'} has been told` : 'Signed out — thank you for serving!');
-  } catch (x) { if (btn) btn.disabled = false; toast('Couldn\u2019t reach the sheet — try again', true); }
+  } catch (x) { if (btn) btn.disabled = false; toast('Couldn\u2019t sign in — check your signal and try again', true); }
 }
 function boardHTML(s, t = now()) {
   const people = slotPeople(s); if (!people.length) return '';
@@ -522,17 +532,17 @@ function stageCard(t = now(), compact) {
     ${compact ? '' : ''}</a>`;
 }
 
-function signBlock(a, t) {
+function signBlock(a, t, extra) {
   if (!SIGNIN_ON() || !a || !a.slot) return '';
   const opens = new Date(+a.from - 30 * 60000);
   const r = sigOf(state.me, a.slot.label);
-  window.__signA = a;
-  if (r) return `<div class="signed card"><span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>Signed in${sigTime(r) ? ' at ' + sigTime(r) : ''}${r.by && key(r.by) !== key(state.me) ? ' by ' + esc(r.by) : ''}</span>
-    <button type="button" class="btn small" data-sign="signout">Sign out</button></div>`;
-  if (t < opens) return `<div class="sign-later">Sign-in opens at ${hm(opens)}, 30 minutes before your shift.</div>`;
+  const i = (window.__signList = extra ? window.__signList || [] : []).push(a) - 1;
+  if (r) return `<div class="signed card"><span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>Signed in${extra ? ' for ' + esc(a.slot.label) : ''}${sigTime(r) ? ' at ' + sigTime(r) : ''}${r.by && key(r.by) !== key(state.me) ? ' by ' + esc(r.by) : ''}</span>
+    <button type="button" class="btn small" data-sign="signout:${i}">Sign out</button></div>`;
+  if (t < opens) return extra ? '' : `<div class="sign-later">Sign-in opens at ${hm(opens)}, 30 minutes before your shift.</div>`;
   if (t >= a.to) return '';
-  return `<button type="button" class="sign-btn" data-sign="signin"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l5 5L20 7"/></svg>I\u2019m here — sign in</button>
-    <div class="sign-later">Your department head is told straight away.</div>`;
+  return `<button type="button" class="sign-btn" data-sign="signin:${i}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l5 5L20 7"/></svg>${extra ? 'Sign in for ' + esc(a.slot.label) : 'I\u2019m here — sign in'}</button>
+    ${extra ? '' : '<div class="sign-later">Your department head is told straight away.</div>'}`;
 }
 
 /* ---------- chips ---------- */
@@ -551,6 +561,24 @@ function cellChips(team, ro, s, t, noRole) {
   const names = namesFor(cell, t);
   if (!names.length) return chip('', ro.role, ref, '', show);
   return names.map((n) => chip(n.name, ro.role, ref, n.note, show)).join('');
+}
+
+/* Set-Up / Set-Down: one name per person per team instead of repeating it for every role */
+function setNames(tm, s) {
+  if (state.editing || !/set/i.test(s.label)) return null;
+  const out = [], seen = new Set();
+  for (const ro of tm.roles) for (const n of namesFor(ro.cells[s.id])) { const k = key(n.name); if (!seen.has(k)) { seen.add(k); out.push({ name: n.name, role: ro.role }); } }
+  return out;
+}
+const setChips = (list) => list.length ? list.map((n) => chip(n.name, n.role, null, '', false)).join('') : chip('', 'Main', null, '', false);
+function teamChips(tm, s, t, noRole) {
+  const one = setNames(tm, s);
+  return one ? setChips(one) : tm.roles.map((ro) => cellChips(tm, ro, s, t, noRole)).join('');
+}
+function teamLines(tm, s) {
+  const one = setNames(tm, s);
+  if (one) return `<div class="tl-line"><span class="role-tag lead">On duty</span><span class="chipset">${setChips(one)}</span></div>`;
+  return tm.roles.map((ro) => `<div class="tl-line"><span class="role-tag ${roleKind(ro.role)}">${esc(ro.role)}</span><span class="chipset">${cellChips(tm, ro, s, null, true)}</span></div>`).join('');
 }
 
 /* ---------- views ---------- */
@@ -581,9 +609,9 @@ const views = {
           <div class="hero-top"><div class="h-display">${esc(s.label)}</div>
             <div class="hero-when">${live ? 'Ends in ' + dur(next.to - t) : 'Starts in ' + dur(next.from - t)}</div></div>
           <div class="hero-time">${range(next.from, next.to)}</div>
-          <div class="chips"><span class="pill dark">${esc(next.team)}</span><span class="pill outline">${esc(next.role === 'Leader' ? 'On duty' : next.role)}</span></div>
+          <div class="chips"><span class="pill dark">${esc(next.role === 'Leader' ? next.team : /set/i.test(s.label) ? 'On duty' : next.role)}</span></div>
         </section>
-        ${signBlock(next, t)}
+        ${signBlock(next, t)}${mine.filter((a) => a !== next && a.slot.label !== next.slot.label && t >= a.from - 30 * 60000 && t < a.to && !mine.some((b) => b !== a && b.slot.label === a.slot.label && mine.indexOf(b) < mine.indexOf(a))).map((a) => signBlock(a, t, true)).join('')}
         <div class="card people">
           ${next.teamObj && leadCell ? `<div class="row"><span>${esc(next.team)} · ${esc(leadCell ? leadCell.role : 'Lead')}</span><span>${esc(leadCell && next.roles.includes(leadCell.role) ? 'You' : leadNames || 'TBC')}</span></div>` : ''}
           ${mates.length ? `<div class="row"><span>With you</span><span>${esc(mates.slice(0, 4).join(', ') + (mates.length > 4 ? ` and ${mates.length - 4} more` : ''))}</span></div>` : ''}
@@ -597,7 +625,7 @@ const views = {
       const st = t >= a.to ? 'done' : t >= a.from ? 'now' : a === next ? 'next' : 'later';
       const word = { done: 'Done', now: 'On now', next: 'Next', later: 'Later' }[st];
       return `<div class="shift-item is-${st}"><div class="slot st-${st}">${esc(a.slot.label)}</div>
-        <div class="mid"><b>${range(a.from, a.to)}</b><small>${esc(a.team)} · ${esc(a.role)}</small></div>
+        <div class="mid"><b>${range(a.from, a.to)}</b><small>${esc(a.team)}${/set/i.test(a.slot.label) ? '' : ' · ' + esc(a.role)}</small></div>
         <span class="state st-${st}">${word}</span></div>`;
     }).join('');
     const remind = C.ONESIGNAL_APP_ID ? (remindOn()
@@ -613,7 +641,7 @@ const views = {
     const lastEnd = Math.max(...m.slots.map((s) => +s.end));
     const legend = `<div class="legend"><span><i style="background:var(--gold)"></i>Lead</span><span><i style="background:#fff"></i>Main</span><span><i style="border:1.5px solid #5A6A9E"></i>Backup</span>${state.me ? '<span><i style="box-shadow:0 0 0 2px var(--live)"></i>You</span>' : ''}</div>`;
     const roster = (s, live) => `<div class="team-rows">${m.teams.map((tm) => `<div class="team-row"><div class="tn">${esc(tm.name)}</div><div class="names">${
-      tm.roles.map((ro) => cellChips(tm, ro, s, live ? t : null)).join('')}</div></div>`).join('')}</div>`;
+      teamChips(tm, s, live ? t : null)}</div></div>`).join('')}</div>`;
 
     if (t < first.start) {
       const ms = first.start - t, d = Math.floor(ms / 864e5), h = Math.floor(ms / 36e5) % 24, mi = Math.floor(ms / 6e4) % 60;
@@ -687,7 +715,7 @@ const views = {
       const st = slotState(s, t);
       return `<div class="tl-item"><div class="tl-when"><b style="color:${st === 'now' ? 'var(--gold)' : st === 'done' ? 'var(--muted)' : '#fff'}">${esc(s.label)}</b><small>${range(s.start, s.end)}</small></div>
         <div class="tl-card ${st === 'now' ? 'now' : ''}">
-          ${team.roles.map((ro) => `<div class="tl-line"><span class="role-tag ${roleKind(ro.role)}">${esc(ro.role)}</span><span class="chipset">${cellChips(team, ro, s, null, true)}</span></div>`).join('')}
+          ${teamLines(team, s)}
           <div class="tl-foot">Dept head: ${esc(s.headDisplay || 'TBC')}${st === 'now' ? ' · <span style="color:var(--live);font-weight:700">ON NOW</span>' : ''}</div>
         </div></div>`;
     }).join('');
@@ -708,7 +736,7 @@ const views = {
         <div class="hd">Head: ${hTxt}</div><div class="hd">Minister: ${mTxt}</div></th>`;
     }).join('');
     const body = m.teams.map((tm) => `<tr><td class="team" scope="row">${esc(tm.name)}</td>${m.slots.map((s) => `<td class="${slotState(s, t) === 'now' ? 'now' : ''}"><div class="stack">${
-      tm.roles.map((ro) => cellChips(tm, ro, s, null)).join('')}</div></td>`).join('')}</tr>`).join('');
+      teamChips(tm, s, null)}</div></td>`).join('')}</tr>`).join('');
     const wide = matchMedia('(min-width: 900px)').matches;
     let body2 = '';
     if (!wide) {
@@ -719,7 +747,7 @@ const views = {
       const hRef = state.editing && sel.headRow >= 0 ? esc(JSON.stringify({ kind: 'meta', label: 'Department head', slot: sel.id, slotLabel: sel.label, row: sel.headRow, col: sel.c0, span: sel.span, value: sel.head })) : '';
       const tabs = m.slots.map((x) => `<button type="button" class="tchip ${x === sel ? 'on' : ''}" data-rslot="${x.id}" aria-pressed="${x === sel}">${esc(x.label)}${slotState(x, t) === 'now' ? ' <span class="live-dot sm"></span>' : ''}</button>`).join('');
       const teams = m.teams.map((tm) => `<div class="rt-card"><div class="rt-name">${esc(tm.name)}</div>${
-        tm.roles.map((ro) => `<div class="tl-line"><span class="role-tag ${roleKind(ro.role)}">${esc(ro.role)}</span><span class="chipset">${cellChips(tm, ro, sel, null, true)}</span></div>`).join('')}</div>`).join('');
+        teamLines(tm, sel)}</div>`).join('');
       body2 = `<div class="chips-scroll rslots" role="group" aria-label="Choose shift">${tabs}</div>
         <div class="rt-head card ${st === 'now' ? 'now' : ''}">
           <div><div class="rt-slot">${esc(sel.label)}</div><div class="rt-time">${range(sel.start, sel.end)}${st === 'now' ? ' · <b style="color:var(--live)">ON NOW</b>' : st === 'done' ? ' · finished' : ''}</div></div>
@@ -775,7 +803,7 @@ document.addEventListener('click', (e) => {
   if (el.id === 'leaderBtn') return state.editing ? stopEditing() : startEditing();
   if (el.id === 'pushOffLink') return disablePush();
   if (el.id === 'remOn') return enableReminders();
-  if (el.dataset.sign) return doSign(el.dataset.sign, window.__signA);
+  if (el.dataset.sign) { const [act, n] = el.dataset.sign.split(':'); const a = (window.__signList || [])[+n || 0]; return a ? doSign(act, a, el) : undefined; }
   if (el.dataset.mark && state.editing) { try { return openMark(JSON.parse(el.dataset.mark)); } catch {} }
   if (el.id === 'copyMissing') { const txt = el.dataset.missing; (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(() => toast('Copied — paste it in WhatsApp'), () => toast(txt)); return; }
   if (el.dataset.rslot) { state.rotaSlot = el.dataset.rslot; render(); const h = $('.rt-head'); if (h && h.getBoundingClientRect().top < 70) h.scrollIntoView({ block: 'start' }); return; }
@@ -810,7 +838,7 @@ function pickName() {
       const b = e.target.closest('[data-name]');
       if (b) { state.me = b.dataset.name; store.set('mp_me', state.me);
         if (remindOn()) loadOneSignal().then((OS) => OS.User.addTags({ person: key(state.me) })).catch(() => {});
-        else if (C.ONESIGNAL_APP_ID && !(isIOS && !isStandalone()) && 'Notification' in window && Notification.permission !== 'denied') setTimeout(enableReminders, 400); closeSheet(); if (tab !== 'rota') location.hash = '#me'; render(); toast('Showing shifts for ' + state.me); }
+        else if (C.ONESIGNAL_APP_ID && !(isIOS && !isStandalone()) && 'Notification' in window && Notification.permission !== 'denied') enableReminders(true); closeSheet(); if (tab !== 'rota') location.hash = '#me'; render(); toast('Showing shifts for ' + state.me); }
       if (e.target.id === 'clearMe') { state.me = ''; store.del('mp_me'); closeSheet(); render(); }
     });
   });
@@ -1060,7 +1088,7 @@ if (state.leader && state.leader.pin && store.get('mp_editing', false)) {
     toast('The leader PIN has changed — tap the padlock to sign in again', true);
   });
 }
-if (C.ONESIGNAL_APP_ID && state.me && !remindOn() && 'Notification' in window && Notification.permission === 'granted') setTimeout(() => enableReminders(), 3500);
+if (C.ONESIGNAL_APP_ID && state.me && !remindOn() && 'Notification' in window && Notification.permission === 'granted') setTimeout(() => enableReminders(true), 3500);
 if ((pushOn() || remindOn()) && C.ONESIGNAL_APP_ID) setTimeout(() => loadOneSignal().catch(() => {}), 3000);
 startNtfy();
 runSplash(() => { render(); setSync(); showInstall(); });
@@ -1070,6 +1098,13 @@ setInterval(shiftAlerts, 30000); setTimeout(shiftAlerts, 4000);
 let lastScroll = 0; window.addEventListener('scroll', () => { lastScroll = Date.now(); }, { passive: true });
 setInterval(() => { setSync(); if (document.visibilityState === 'visible' && !$('#sheet').innerHTML && Date.now() - lastScroll > 4000 && (tab === 'now' || tab === 'me' || tab === 'prog')) render(); }, 30000);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') load(true); });
+const bootAt = Date.now();
+if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', (ev) => {
+  if (!ev.data || ev.data.type !== 'mp-updated') return;
+  // a newer version was just saved: swap to it once, only while the opening animation is still up (never mid-use)
+  let last = 0; try { last = +sessionStorage.getItem('mp_upd') || 0; } catch {}
+  if (Date.now() - bootAt < 6000 && Date.now() - last > 60000 && !$('#sheet').innerHTML) { try { sessionStorage.setItem('mp_upd', Date.now()); } catch {} location.reload(); }
+});
 if ('serviceWorker' in navigator) {
   // One background helper only. If the notification service has already registered it (with its own settings),
   // reuse that registration instead of replacing it — replacing it each time caused a reload loop.

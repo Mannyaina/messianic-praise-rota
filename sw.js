@@ -1,8 +1,8 @@
 // Lock-screen alerts for leaders (OneSignal) — must be first
 try { importScripts('https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.sw.js'); } catch (e) {}
 // Offline support: keep the app shell on the phone; rota data always comes fresh from the sheet
-const VERSION = 'mp-rota-v22';
-const SHELL = ['./', 'index.html', 'styles.css?v=22', 'config.js?v=22', 'programme.js?v=22', 'app.js?v=22', 'logo.webp', 'logo-sm.webp', 'manifest.webmanifest',
+const VERSION = 'mp-rota-v24';
+const SHELL = ['./', 'index.html', 'styles.css?v=24', 'config.js?v=24', 'programme.js?v=24', 'app.js?v=24', 'logo.webp', 'logo-sm.webp', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/favicon.png'];
 
 self.addEventListener('install', (e) => {
@@ -22,16 +22,26 @@ self.addEventListener('fetch', (e) => {
     return;
   }
   if (url.origin !== location.origin) return;
-  // the page itself: always ask for the latest (so updates show straight away), but never wait more than 1.5s
+  // the page itself: open instantly from the phone (no white screen), then check for a newer version in the background
   if (e.request.mode === 'navigate') {
-    e.respondWith(caches.open(VERSION).then(async (c) => {
-      const net = fetch(e.request, { cache: 'no-cache' }).then((r) => { if (r && r.ok) c.put('index.html', r.clone()); return r; }).catch(() => null);
-      const timeout = new Promise((res) => setTimeout(() => res(null), 1500));
-      const first = await Promise.race([net, timeout]);
-      if (first) return first;
+    const id = e.resultingClientId || e.clientId;
+    const work = caches.open(VERSION).then(async (c) => {
       const saved = (await c.match('index.html')) || (await c.match('./'));
-      return saved || (await net) || Response.error();
-    }));
+      const old = saved ? await saved.clone().text() : null;
+      const net = fetch(e.request.url, { cache: 'no-cache', credentials: 'same-origin' }).then(async (r) => {
+        if (!r || !r.ok) return r;
+        const fresh = await r.clone().text();
+        await c.put('index.html', r.clone());
+        if (old !== null && old !== fresh) setTimeout(async () => {
+          const cl = id && (await self.clients.get(id));
+          (cl ? [cl] : await self.clients.matchAll({ type: 'window' })).forEach((x) => x.postMessage({ type: 'mp-updated' }));
+        }, 400);
+        return r;
+      }).catch(() => null);
+      return { saved, net };
+    });
+    e.respondWith(work.then(async ({ saved, net }) => saved || (await net) || Response.error()));
+    e.waitUntil(work.then(({ net }) => net));
     return;
   }
   // app files carry a version number, so a saved copy is always the right one: answer instantly from the phone
