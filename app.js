@@ -1098,6 +1098,32 @@ setInterval(shiftAlerts, 30000); setTimeout(shiftAlerts, 4000);
 let lastScroll = 0; window.addEventListener('scroll', () => { lastScroll = Date.now(); }, { passive: true });
 setInterval(() => { setSync(); if (document.visibilityState === 'visible' && !$('#sheet').innerHTML && Date.now() - lastScroll > 4000 && (tab === 'now' || tab === 'me' || tab === 'prog')) render(); }, 30000);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') load(true); });
+/* live updates: when the app is reopened, and every minute while it's open, check for a newer version and switch to it
+   (only when nobody is mid-tap, scrolling or has a panel open — so it never jumps under someone's finger) */
+const MY_V = (([...document.scripts].map((x) => x.src).find((x) => /app\.js\?v=/.test(x)) || '').match(/v=(\d+)/) || [])[1] || '';
+let vcBusy = false;
+async function checkVersion(force) {
+  if (vcBusy || !MY_V || DEMO || !navigator.onLine) return;
+  vcBusy = true;
+  try {
+    const r = await fetch('index.html?vc=' + Date.now(), { cache: 'no-store' });
+    if (!r.ok) return;
+    const html = await r.text();
+    const v = (html.match(/app\.js\?v=(\d+)/) || [])[1];
+    if (!v || v === MY_V) return;
+    const idle = !$('#sheet').innerHTML && Date.now() - lastScroll > 5000 && !(document.activeElement && /INPUT|TEXTAREA/.test(document.activeElement.tagName));
+    if (!force && !idle) return;
+    let last = 0; try { last = +sessionStorage.getItem('mp_vc') || 0; } catch {}
+    if (Date.now() - last < 30000) return; // never more than one switch every 30s
+    try { sessionStorage.setItem('mp_vc', Date.now()); } catch {}
+    // save the new page into the phone's copy first, so the reload opens the new version straight away
+    try { for (const k of await caches.keys()) { const c = await caches.open(k); if (await c.match('index.html')) await c.put('index.html', new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })); } } catch {}
+    location.reload();
+  } catch {} finally { vcBusy = false; }
+}
+setTimeout(() => checkVersion(true), 2500);
+setInterval(() => { if (document.visibilityState === 'visible') checkVersion(false); }, 60000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkVersion(false); });
 const bootAt = Date.now();
 if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', (ev) => {
   if (!ev.data || ev.data.type !== 'mp-updated') return;
@@ -1120,6 +1146,6 @@ if ('serviceWorker' in navigator) {
     } catch {}
   });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
-  setInterval(check, 5 * 60 * 1000);
+  setInterval(check, 60 * 1000);
 }
 })();
