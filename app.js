@@ -1070,5 +1070,13 @@ setInterval(shiftAlerts, 30000); setTimeout(shiftAlerts, 4000);
 let lastScroll = 0; window.addEventListener('scroll', () => { lastScroll = Date.now(); }, { passive: true });
 setInterval(() => { setSync(); if (document.visibilityState === 'visible' && !$('#sheet').innerHTML && Date.now() - lastScroll > 4000 && (tab === 'now' || tab === 'me' || tab === 'prog')) render(); }, 30000);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') load(true); });
-if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+if ('serviceWorker' in navigator) {
+  const opened = Date.now(); let reloaded = false; const hadController = !!navigator.serviceWorker.controller; // first visit: don't reload
+  // a new version just took over within seconds of opening: switch to it now rather than next time
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloaded || Date.now() - opened > 15000 || !$('#sheet').hidden) return;
+    reloaded = true; location.reload();
+  });
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => reg.update()).catch(() => {}));
+}
 })();
