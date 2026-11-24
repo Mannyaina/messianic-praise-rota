@@ -992,7 +992,7 @@ function runSplash(done) {
   for (let i = 0; i < N; i++) {
     const a = (i / N) * Math.PI * 2 + (Math.random() - 0.5) * 0.3;
     const el = document.createElement('i');
-    el.style.setProperty('--d', `${1.35 + Math.random() * 0.25}s`);
+    el.style.setProperty('--d', `${0.9 + Math.random() * 0.2}s`);
     el.style.width = el.style.height = `${4 + Math.random() * 6}px`;
     el.style.setProperty('--x0', `${Math.cos(a) * 120}px`); el.style.setProperty('--y0', `${Math.sin(a) * 100}px`);
     el.style.setProperty('--x1', `${Math.cos(a) * (170 + Math.random() * 110)}px`); el.style.setProperty('--y1', `${Math.sin(a) * (150 + Math.random() * 100)}px`);
@@ -1003,11 +1003,14 @@ function runSplash(done) {
     if (finished) return; finished = true;
     sp.classList.add('out');
     $('#app').hidden = false; done();
-    setTimeout(() => sp.remove(), 800);
+    setTimeout(() => sp.remove(), 600);
   };
-  let quick = false;
-  try { quick = !!sessionStorage.getItem('mp_seen'); sessionStorage.setItem('mp_seen', '1'); } catch {}
-  const len = reduce ? 1100 : quick ? 2700 : 3500;
+  // full opening once a day; a quick 0.7s version on every other open
+  const today = new Date().toDateString();
+  const quick = store.get('mp_splash_day', '') === today;
+  store.set('mp_splash_day', today);
+  if (quick) sp.classList.add('quick');
+  const len = reduce ? 600 : quick ? 700 : 2100;
   const timer = setTimeout(finish, len);
   sp.addEventListener('click', () => { clearTimeout(timer); finish(); });
 }
@@ -1045,6 +1048,12 @@ function runSplash(done) {
 })();
 
 /* ---------- boot ---------- */
+(() => {
+  const cache = store.get('mp_cache', null);
+  if (cache && cache.source !== 'demo' && !DEMO) {
+    try { state.model = buildModel(cache.rows, cache.source); state.sig = JSON.stringify(cache.rows) + JSON.stringify(state.signins); state.updated = new Date(cache.at); } catch {}
+  }
+})();
 if (state.leader && state.leader.pin && store.get('mp_editing', false)) {
   state.editing = true;
   api({ action: 'verify', pin: state.leader.pin, editor: state.leader.name }).catch(() => {

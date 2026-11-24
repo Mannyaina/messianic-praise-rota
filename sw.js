@@ -1,8 +1,8 @@
 // Lock-screen alerts for leaders (OneSignal) — must be first
 try { importScripts('https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.sw.js'); } catch (e) {}
 // Offline support: keep the app shell on the phone; rota data always comes fresh from the sheet
-const VERSION = 'mp-rota-v16';
-const SHELL = ['./', 'index.html', 'styles.css?v=16', 'config.js?v=16', 'programme.js?v=16', 'app.js?v=16', 'logo.png', 'manifest.webmanifest',
+const VERSION = 'mp-rota-v17';
+const SHELL = ['./', 'index.html', 'styles.css?v=17', 'config.js?v=17', 'programme.js?v=17', 'app.js?v=17', 'logo.webp', 'logo-sm.webp', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/favicon.png'];
 
 self.addEventListener('install', (e) => {
@@ -22,9 +22,11 @@ self.addEventListener('fetch', (e) => {
     return;
   }
   if (url.origin !== location.origin) return;
-  // app files: network first so updates arrive, fall back to cache offline
-  e.respondWith(
-    fetch(e.request).then((r) => { const copy = r.clone(); caches.open(VERSION).then((c) => c.put(e.request, copy)); return r; })
-      .catch(() => caches.match(e.request).then((r) => r || caches.match('index.html')))
-  );
+  // app files: answer instantly from the phone, fetch any update in the background for next time
+  e.respondWith(caches.open(VERSION).then(async (c) => {
+    const hit = await c.match(e.request, { ignoreSearch: e.request.mode === 'navigate' });
+    const net = fetch(e.request).then((r) => { if (r && r.ok) c.put(e.request, r.clone()); return r; }).catch(() => null);
+    if (hit) { e.waitUntil(net); return hit; }
+    return (await net) || (await c.match('index.html')) || Response.error();
+  }));
 });
