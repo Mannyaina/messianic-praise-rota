@@ -300,6 +300,55 @@ function showAlert(title, body, kind) {
   chime(kind);
   if (navigator.vibrate) try { navigator.vibrate(kind === 'warn' ? [120, 60, 120, 60, 120] : [80, 40, 80]); } catch {}
 }
+/* lock-screen notifications (OneSignal) — leaders only */
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+let osReady = null;
+function loadOneSignal() {
+  if (osReady) return osReady;
+  osReady = new Promise((resolve, reject) => {
+    window.OneSignalDeferred = window.OneSignalDeferred || [];
+    const dir = location.pathname.replace(/[^/]*$/, '');            // e.g. /messianic-praise-rota/
+    window.OneSignalDeferred.push(async (OneSignal) => {
+      try {
+        await OneSignal.init({ appId: C.ONESIGNAL_APP_ID, serviceWorkerPath: dir.slice(1) + 'sw.js', serviceWorkerParam: { scope: dir },
+          notifyButton: { enable: false }, allowLocalhostAsSecureOrigin: true });
+        resolve(OneSignal);
+      } catch (e) { reject(e); }
+    });
+    const sc = document.createElement('script');
+    sc.src = 'https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js'; sc.defer = true;
+    sc.onerror = () => reject(new Error('Could not load the notification service'));
+    document.head.appendChild(sc);
+  });
+  return osReady;
+}
+const pushOn = () => store.get('mp_push', false);
+async function enablePush() {
+  if (!C.ONESIGNAL_APP_ID) return;
+  if (isIOS && !isStandalone()) {
+    return openSheet(`<h2>Add the app first</h2><p>On iPhone, lock-screen alerts only work from the app on your home screen.</p>
+      <ol class="steps"><li>Open this page in <b>Safari</b> and tap <b>Share</b> <svg class="ios-share" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M8 7l4-4 4 4M5 12v8h14v-8"/></svg></li>
+      <li>Tap <b>Add to Home Screen</b>, then <b>Add</b>.</li><li>Open the app from your home screen, unlock leader mode, and tap <b>Lock-screen alerts</b> again.</li></ol>
+      <div class="row-btns"><button class="btn primary" data-close type="button">Got it</button></div>`);
+  }
+  if (!('Notification' in window)) return toast('This phone can\u2019t show alerts from web apps — update it or use another phone', true);
+  try {
+    toast('Asking your phone for permission…');
+    const OS = await loadOneSignal();
+    await OS.Notifications.requestPermission();
+    if (!OS.Notifications.permission) { return toast('Alerts not allowed — turn on notifications for this app in Settings', true); }
+    await OS.User.PushSubscription.optIn();
+    await OS.User.addTags({ leader: '1', name: (state.leader && state.leader.name) || '' });
+    store.set('mp_push', true); renderLeaderBar();
+    showAlert('Lock-screen alerts are on', 'You\u2019ll get sign-in alerts even when your phone is locked', 'ok');
+  } catch (e) { console.warn(e); toast('Couldn\u2019t turn on alerts: ' + (e.message || e), true); }
+}
+async function disablePush() {
+  try { const OS = await loadOneSignal(); await OS.User.removeTag('leader'); await OS.User.PushSubscription.optOut(); } catch {}
+  store.set('mp_push', false); renderLeaderBar(); toast('Lock-screen alerts off');
+}
+
 function leaderAlert(recs) {
   if (!alertsOn() || document.hidden) return;
   const others = recs.filter((r) => key(r.by) !== key(state.leader.name) && key(r.name) !== key(state.leader.name));
@@ -356,6 +405,7 @@ async function ntfyPost(rec, title, tags, prio) {
   const r1 = await fetch(`https://ntfy.sh/${encodeURIComponent(C.NTFY_LOG)}`, { method: 'POST', body });
   if (!r1.ok) throw new Error('Could not save sign-in (' + r1.status + ')');
   const m = await r1.json(); addNtfy([ntfyRec(m)]);
+  if (C.ALERTS_URL) fetch(C.ALERTS_URL, { method: 'POST', body: '{}', mode: 'no-cors' }).catch(() => {});
   fetch('https://ntfy.sh/', { method: 'POST', body: JSON.stringify({ topic: C.NTFY_TOPIC, title, message: `${rec.slot} · ${rec.team}${rec.role ? ' · ' + rec.role : ''} · ${hm(now())}`, tags: [tags], priority: prio }) }).catch(() => {});
 }
 async function sha(t) { const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t)); return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join(''); }
@@ -765,9 +815,11 @@ function renderLeaderBar() {
   bar.hidden = false;
   bar.innerHTML = `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>
     <div class="grow"><b>Leader mode</b> (${esc(state.leader?.name || '')}). ${NTFY() ? 'On Live now, tap a name on the check-in board to mark them present.' : 'Tap any name in Teams or Full rota to change it.'}</div>
-    <button class="btn small" type="button" id="alertTgl" aria-pressed="${alertsOn()}">${alertsOn() ? 'Alerts on' : 'Alerts off'}</button>
+    <button class="btn small" type="button" id="alertTgl" aria-pressed="${alertsOn()}">${alertsOn() ? 'Sound on' : 'Sound off'}</button>
+    ${C.ONESIGNAL_APP_ID ? `<button class="btn small ${pushOn() ? '' : 'primary'}" type="button" id="pushTgl">${pushOn() ? 'Lock-screen alerts on' : 'Lock-screen alerts'}</button>` : ''}
     <button class="btn small" type="button" id="leaderBtnOff">Done</button>`;
   bar.querySelector('#leaderBtnOff').onclick = stopEditing;
+  const pt = bar.querySelector('#pushTgl'); if (pt) pt.onclick = () => (pushOn() ? disablePush() : enablePush());
   bar.querySelector('#alertTgl').onclick = () => { const on = !alertsOn(); store.set('mp_alerts', on); renderLeaderBar(); if (on) showAlert('Alerts are on', 'You\u2019ll hear and see each sign-in while the app is open', 'ok'); else toast('Alerts off'); };
 }
 function stopEditing() { state.editing = false; render(); toast('Leader editing off'); }
@@ -969,6 +1021,7 @@ function runSplash(done) {
 })();
 
 /* ---------- boot ---------- */
+if (pushOn() && C.ONESIGNAL_APP_ID) setTimeout(() => loadOneSignal().catch(() => {}), 3000);
 startNtfy();
 runSplash(() => { render(); setSync(); showInstall(); });
 load(true);

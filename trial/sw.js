@@ -1,6 +1,8 @@
+// Lock-screen alerts for leaders (OneSignal) — must be first
+try { importScripts('https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.sw.js'); } catch (e) {}
 // Offline support: keep the app shell on the phone; rota data always comes fresh from the sheet
-const VERSION = 'mp-rota-trialpath-v12';
-const SHELL = ['./', 'index.html', 'styles.css?v=12', 'config.js?v=12', 'programme.js?v=12', 'app.js?v=12', 'logo.png', 'manifest.webmanifest',
+const VERSION = 'mp-rota-trialpath-v13';
+const SHELL = ['./', 'index.html', 'styles.css?v=13', 'config.js?v=13', 'programme.js?v=13', 'app.js?v=13', 'logo.png', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/favicon.png'];
 
 self.addEventListener('install', (e) => {
@@ -13,7 +15,7 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET') return;
   // never cache the rota itself
-  if (/docs\.google\.com|script\.google\.com|googleusercontent\.com/.test(url.host)) return;
+  if (/docs\.google\.com|script\.google\.com|googleusercontent\.com|onesignal\.com|ntfy\.sh/.test(url.host)) return;
   // fonts: cache-first
   if (/fonts\.(googleapis|gstatic)\.com/.test(url.host)) {
     e.respondWith(caches.open(VERSION).then(async (c) => (await c.match(e.request)) || fetch(e.request).then((r) => { c.put(e.request, r.clone()); return r; })));
