@@ -473,7 +473,7 @@ function boardHTML(s, t = now()) {
     <div class="b-key"><span><i style="background:var(--ok)"></i>In</span><span><i style="background:#F28C28"></i>Late (${nLate})</span><span><i class="dash"></i>Not yet (${nWait})</span></div>
     ${teams.map((tn) => `<div class="b-team"><div class="b-tn"><span>${esc(tn)}</span><span>${rows.filter((x) => x.p.team === tn && x.c.st === 'in').length} / ${rows.filter((x) => x.p.team === tn).length}</span></div><div class="b-pills">${rows.filter((x) => x.p.team === tn).map(pill).join('')}</div></div>`).join('')}
     ${missing.length ? `<button type="button" class="btn small" id="copyMissing" data-missing="${esc(`${s.label} — not signed in yet: ${missing.join(', ')}`)}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></svg>Copy missing list for WhatsApp</button>` : '<div class="b-all">Everyone is in. Thank you, team!</div>'}
-    ${state.editing ? '<div class="b-hint">Leader: tap a name to mark them present or not here.</div>' : ''}
+    ${state.editing ? `<div class="b-hint">Leader: tap a name to mark them present or not here.${C.ONESIGNAL_APP_ID && pushOn() ? ' · Lock-screen alerts on · <button type="button" class="linkish" id="pushOffLink">turn off</button>' : ''}</div>` : ''}
   </section>`;
 }
 function openMark(m) {
@@ -775,6 +775,7 @@ document.addEventListener('click', (e) => {
   if (el.id === 'retry' || el.id === 'syncBtn') return load();
   if (el.id === 'printBtn') return window.print();
   if (el.id === 'leaderBtn') return state.editing ? stopEditing() : startEditing();
+  if (el.id === 'pushOffLink') return disablePush();
   if (el.id === 'remOn') return enableReminders();
   if (el.id === 'remOff') return disableReminders();
   if (el.dataset.sign) return doSign(el.dataset.sign, window.__signA);
@@ -835,18 +836,17 @@ document.addEventListener('click', (e) => {
 /* ---------- leader editing ---------- */
 function renderLeaderBar() {
   const bar = $('#leaderBar');
-  if (!state.editing) { bar.hidden = true; return; }
+  if (!state.editing || (C.ONESIGNAL_APP_ID && pushOn())) { bar.hidden = true; return; }
   bar.hidden = false;
   bar.innerHTML = `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>
-    <div class="grow"><b>Leader mode</b> (${esc(state.leader?.name || '')}). ${NTFY() ? 'On Live now, tap a name on the check-in board to mark them present.' : 'Tap any name in Teams or Full rota to change it.'}</div>
+    <div class="grow"><b>Leader mode</b> (${esc(state.leader?.name || '')}). Turn on lock-screen alerts below. Tap the padlock to leave leader mode.</div>
     <button class="btn small" type="button" id="alertTgl" aria-pressed="${alertsOn()}">${alertsOn() ? 'Sound on' : 'Sound off'}</button>
     ${C.ONESIGNAL_APP_ID ? `<button class="btn small ${pushOn() ? '' : 'primary'}" type="button" id="pushTgl">${pushOn() ? 'Lock-screen alerts on' : 'Lock-screen alerts'}</button>` : ''}
-    <button class="btn small" type="button" id="leaderBtnOff">Done</button>`;
-  bar.querySelector('#leaderBtnOff').onclick = stopEditing;
+`;
   const pt = bar.querySelector('#pushTgl'); if (pt) pt.onclick = () => (pushOn() ? disablePush() : enablePush());
   bar.querySelector('#alertTgl').onclick = () => { const on = !alertsOn(); store.set('mp_alerts', on); renderLeaderBar(); if (on) showAlert('Alerts are on', 'You\u2019ll hear and see each sign-in while the app is open', 'ok'); else toast('Alerts off'); };
 }
-function stopEditing() { state.editing = false; render(); toast('Leader editing off'); }
+function stopEditing() { state.editing = false; store.set('mp_editing', false); render(); toast('Leader mode off'); }
 
 async function api(body) {
   if (NTFY()) {
@@ -898,7 +898,7 @@ function startEditing() {
   if (state.leader && state.leader.pin) {
     // re-check a remembered PIN (it may have been changed since)
     return api({ action: 'verify', pin: state.leader.pin, editor: state.leader.name }).then(() => {
-      state.editing = true; render(); toast(NTFY() ? 'Leader mode on — tap names on the check-in board' : 'Leader editing on — tap a name to change it');
+      state.editing = true; store.set('mp_editing', true); render(); toast(NTFY() ? 'Leader mode on — tap names on the check-in board' : 'Leader editing on — tap a name to change it');
     }, () => { state.leader = null; store.del('mp_leader'); toast('The leader PIN has changed — please enter the new one', true); startEditing(); });
   }
   openSheet(`<h2>Leader mode</h2><p>${DEMO ? '<b>Trial:</b> use any name and PIN <b>2711</b>. Edits stay on this device. ' : ''}Department heads and team leads only. ${NTFY() ? 'You can mark people present on the check-in board.' : 'Your changes go straight into the Google Sheet and everyone sees them.'}</p>
@@ -912,7 +912,7 @@ function startEditing() {
       const err = sh.querySelector('#le'); err.textContent = 'Checking…';
       try {
         await api({ action: 'verify', pin, editor: name });
-        state.leader = { name, pin }; store.set('mp_leader', state.leader); state.editing = true;
+        state.leader = { name, pin }; store.set('mp_leader', state.leader); state.editing = true; store.set('mp_editing', true);
         closeSheet(); render(); toast('Welcome ' + name + ' — tap any name to edit');
       } catch (x) { err.textContent = x.message === 'Wrong PIN' ? 'That PIN isn’t right.' : 'Couldn’t check the PIN: ' + x.message; }
     });
@@ -1045,6 +1045,13 @@ function runSplash(done) {
 })();
 
 /* ---------- boot ---------- */
+if (state.leader && state.leader.pin && store.get('mp_editing', false)) {
+  state.editing = true;
+  api({ action: 'verify', pin: state.leader.pin, editor: state.leader.name }).catch(() => {
+    state.leader = null; state.editing = false; store.del('mp_leader'); store.set('mp_editing', false); render();
+    toast('The leader PIN has changed — tap the padlock to sign in again', true);
+  });
+}
 if ((pushOn() || remindOn()) && C.ONESIGNAL_APP_ID) setTimeout(() => loadOneSignal().catch(() => {}), 3000);
 startNtfy();
 runSplash(() => { render(); setSync(); showInstall(); });
