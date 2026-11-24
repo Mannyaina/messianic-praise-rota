@@ -352,7 +352,10 @@ function openMark(m) {
         const j = await api({ action: 'mark', pin: state.leader.pin, editor: state.leader.name, value, name: m.name, slot: m.slot, team: m.team, role: m.role });
         if (j.signins) state.signins = j.signins;
         closeSheet(); render(); toast(value === 'in' ? `${m.name} marked present` : `${m.name} marked not here`);
-      } catch (x) { sh.querySelector('#me2').textContent = 'Couldn\u2019t save: ' + x.message; }
+      } catch (x) {
+        if (/pin/i.test(x.message)) { state.leader = null; store.del('mp_leader'); state.editing = false; closeSheet(); render(); return toast('PIN no longer valid — tap the padlock and sign in again', true); }
+        sh.querySelector('#me2').textContent = 'Couldn\u2019t save: ' + x.message;
+      }
     };
     sh.querySelector('#mkIn').onclick = () => go('in'); sh.querySelector('#mkOut').onclick = () => go('out');
   });
@@ -749,12 +752,17 @@ function startEditing() {
       <div class="row-btns"><a class="btn primary" href="https://docs.google.com/spreadsheets/d/${C.SHEET_ID}/edit" target="_blank" rel="noopener">Open Google Sheet</a><button class="btn" data-close type="button">Close</button></div>`);
   }
   if (state.model && !state.model.editable && !NTFY()) return toast('Reconnecting to the sheet — try again in a moment', true);
-  if (state.leader && state.leader.pin) { state.editing = true; render(); return toast('Leader editing on — tap a name to change it'); }
-  openSheet(`<h2>Leader sign-in</h2><p>${DEMO ? '<b>Trial:</b> use any name and PIN <b>2711</b>. Edits stay on this device. ' : ''}Department heads and team leads only. ${NTFY() ? 'You can mark people present on the check-in board.' : 'Your changes go straight into the Google Sheet and everyone sees them.'}</p>
+  if (state.leader && state.leader.pin) {
+    // re-check a remembered PIN (it may have been changed since)
+    return api({ action: 'verify', pin: state.leader.pin, editor: state.leader.name }).then(() => {
+      state.editing = true; render(); toast(NTFY() ? 'Leader mode on — tap names on the check-in board' : 'Leader editing on — tap a name to change it');
+    }, () => { state.leader = null; store.del('mp_leader'); toast('The leader PIN has changed — please enter the new one', true); startEditing(); });
+  }
+  openSheet(`<h2>Leader mode</h2><p>${DEMO ? '<b>Trial:</b> use any name and PIN <b>2711</b>. Edits stay on this device. ' : ''}Department heads and team leads only. ${NTFY() ? 'You can mark people present on the check-in board.' : 'Your changes go straight into the Google Sheet and everyone sees them.'}</p>
     <form id="lf"><div class="field"><label for="ln">Your name</label><input id="ln" required autocomplete="name" value="${esc(state.me)}"></div>
     <div class="field"><label for="lp">Leader PIN</label><input id="lp" required inputmode="numeric" type="password" autocomplete="off"></div>
     <div class="err" id="le"></div>
-    <div class="row-btns"><button class="btn primary" type="submit">Unlock editing</button><button class="btn" data-close type="button">Cancel</button></div></form>`, (sh) => {
+    <div class="row-btns"><button class="btn primary" type="submit">${NTFY() ? 'Unlock leader mode' : 'Unlock editing'}</button><button class="btn" data-close type="button">Cancel</button></div></form>`, (sh) => {
     sh.querySelector('#lf').addEventListener('submit', async (e) => {
       e.preventDefault();
       const name = sh.querySelector('#ln').value.trim(), pin = sh.querySelector('#lp').value.trim();
