@@ -11,7 +11,9 @@ window.MP_CONFIG = {
 
   // Shift sign-in shared through ntfy (used until SCRIPT_URL is set)
   NTFY_LOG: 'mp2026-media-d025c907-log',   // the app's sign-in log (nobody needs to subscribe)
-  NTFY_TOPIC: 'mp2026-media-d025c907',     // leaders subscribe to this in the ntfy app for alerts
+  NTFY_TOPIC: 'mp2026-media-d025c907',
+  NTFY_SEEN: 'mp2026-media-d025c907-seen', // phones check in here when the app is opened (for the leaders' "Who's on the app" list)
+  USERS_SHEET: 'App users',     // leaders subscribe to this in the ntfy app for alerts
   // Lock-screen alerts for leaders (OneSignal) and the Google script that sends them
   ONESIGNAL_APP_ID: '11214d5e-bfa6-44a1-b203-0aaf98270575',
   ALERTS_URL: 'https://script.google.com/macros/s/AKfycbxH-alGr0Fug0OoWTmjPjh55LNBUimlk4MWeYS0Z7LVkHyah5vKirLrPXRxv5e_nJiDqQ/exec',

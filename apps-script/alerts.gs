@@ -8,6 +8,8 @@
  *      – "Shift X starts at hh:mm · n of m signed in"  (15 min before each shift)
  *      – "Shift X · n not signed in: names"            (10 min after each shift starts)
  *  • It copies every sign-in into a "Sign-ins" tab in the rota sheet, as a record.
+ *  • It keeps an "App users" tab: who has opened the app, on which phone, whether it's saved
+ *    to their home screen and whether notifications are on.
  *
  * One-time setup
  *  1. Project Settings (gear) › Script properties › Add:  ONESIGNAL_KEY = <your OneSignal REST API key>
@@ -21,6 +23,8 @@ const SIGNIN_LOG = 'mp2026-media-d025c907-log';   // where the app shares sign-i
 const SHEET_ID = '1nLvViwgEWfznM1tx5apCDBuh_HDC0hHsKlaO3BXR3co';
 const SHEET_NAME = 'Sheet1';
 const SIGNIN_SHEET = 'Sign-ins';
+const SEEN_LOG = 'mp2026-media-d025c907-seen';    // phones check in here each time the app is opened
+const USERS_SHEET = 'App users';
 const EVENT_DAY = '2026-11-27';                     // day Set-Up starts; times before 12:00 = next morning
 const LATE_AFTER_MIN = 10;
 
@@ -39,6 +43,7 @@ function setup() {
   send_('MP Rota alerts are switched on', 'Leaders who turn on alerts in the app will get sign-in notifications.');
 }
 function tick() {
+  try { processSeen_(); } catch (err) { console.warn(err); }
   const start = at_('15:00'), end = at_('07:00');
   const now = new Date();
   if (now < new Date(+start - 60 * 60000) || now > new Date(+end + 60 * 60000)) return; // only around the event
@@ -195,6 +200,52 @@ function at_(t) {
   const d = new Date(p[0], p[1] - 1, p[2], h, mi, 0);
   if (h < 12) d.setDate(d.getDate() + 1);
   return d;
+}
+
+/* ---------- app check-ins → "App users" tab (one row per phone) ---------- */
+function processSeen_() {
+  const props = PropertiesService.getScriptProperties();
+  const since = +(props.getProperty('seenTs') || 0);
+  const doneIds = JSON.parse(props.getProperty('seenIds') || '[]');
+  const res = UrlFetchApp.fetch('https://ntfy.sh/' + SEEN_LOG + '/json?poll=1&since=' + (since ? since : '12h'), { muteHttpExceptions: true });
+  if (res.getResponseCode() !== 200) return;
+  const recs = res.getContentText().split('\n').filter(String).map((l) => {
+    try { const m = JSON.parse(l); if (m.event !== 'message' || doneIds.indexOf(m.id) >= 0) return null; const d = JSON.parse(m.message); return d.dev ? { id: m.id, time: m.time, d: d } : null; } catch (err) { return null; }
+  }).filter(Boolean);
+  if (!recs.length) return;
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(8000)) return;
+  try {
+    const sh = usersSheet_();
+    const data = sh.getDataRange().getValues();
+    const rowOf = {}; for (let i = 1; i < data.length; i++) rowOf[data[i][9]] = i + 1;
+    recs.sort((a, b) => a.time - b.time).forEach((r) => {
+      const d = r.d, when = new Date(r.time * 1000), row = rowOf[d.dev];
+      const vals = [d.name || '(no name picked)', d.viewing || '', d.phone || '', d.home || '', d.notif || '', d.leader || '', null, when, null, d.dev];
+      if (row) {
+        const cur = sh.getRange(row, 1, 1, 10).getValues()[0];
+        vals[6] = cur[6]; vals[8] = (+cur[8] || 0) + 1;
+        if (!d.name && cur[0]) vals[0] = cur[0];
+        sh.getRange(row, 1, 1, 10).setValues([vals]);
+      } else {
+        vals[6] = when; vals[8] = 1;
+        sh.appendRow(vals); rowOf[d.dev] = sh.getLastRow();
+      }
+    });
+    const maxT = recs[recs.length - 1].time;
+    props.setProperty('seenTs', String(maxT));
+    props.setProperty('seenIds', JSON.stringify(recs.filter((r) => r.time === maxT).map((r) => r.id).concat(since === maxT ? doneIds : []).slice(-50)));
+  } finally { lock.releaseLock(); }
+}
+function usersSheet_() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  let sh = ss.getSheetByName(USERS_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(USERS_SHEET);
+    sh.appendRow(['Name', 'Viewing rota for', 'Phone', 'On home screen', 'Notifications', 'Leader', 'First opened', 'Last opened', 'Opens', 'Device']);
+    sh.setFrozenRows(1); sh.getRange('G:H').setNumberFormat('ddd d mmm hh:mm');
+  }
+  return sh;
 }
 
 /* ---------- helpers ---------- */

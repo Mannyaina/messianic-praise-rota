@@ -437,6 +437,18 @@ async function ntfyPost(rec, title, tags, prio) {
   if (C.ALERTS_URL) fetch(C.ALERTS_URL, { method: 'POST', body: '{}', mode: 'no-cors' }).catch(() => {});
   fetch('https://ntfy.sh/', { method: 'POST', body: JSON.stringify({ topic: C.NTFY_TOPIC, title, message: `${rec.slot} · ${rec.team}${rec.role ? ' · ' + rec.role : ''} · ${hm(now())}`, tags: [tags], priority: prio }) }).catch(() => {});
 }
+/* ---------- app check-in: lets leaders see who has the app, whether it's on their home screen and notifications are on ---------- */
+function deviceId() { let d = store.get('mp_dev', ''); if (!d) { d = Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); store.set('mp_dev', d); } return d; }
+function phoneKind() { const u = navigator.userAgent; return isIOS ? (/ipad/i.test(u) || navigator.maxTouchPoints > 1 && !/iphone/i.test(u) ? 'iPad' : 'iPhone') : /android/i.test(u) ? 'Android' : 'Computer'; }
+function notifState() { return !('Notification' in window) ? 'Not supported' : Notification.permission === 'granted' ? (remindOn() || pushOn() ? 'On' : 'Allowed') : Notification.permission === 'denied' ? 'Blocked' : 'Off'; }
+function pingSeen(force) {
+  if (DEMO || !C.NTFY_SEEN || !navigator.onLine) return;
+  const rec = { dev: deviceId(), name: (state.leader && state.leader.name) || state.me || '', viewing: state.me || '', home: isStandalone() ? 'Yes' : 'No', notif: notifState(), phone: phoneKind(), leader: state.leader ? 'Yes' : 'No', v: MY_V };
+  const sig = JSON.stringify(rec), last = store.get('mp_ping', { at: 0, sig: '' });
+  if (!force && last.sig === sig && Date.now() - last.at < 20 * 60000) return; // at most every 20 min unless something changed
+  store.set('mp_ping', { at: Date.now(), sig });
+  fetch(`https://ntfy.sh/${encodeURIComponent(C.NTFY_SEEN)}`, { method: 'POST', body: sig }).catch(() => {});
+}
 async function sha(t) { const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t)); return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join(''); }
 function sigOf(name, slotLabel) {
   const k = key(name); let last = null;
@@ -769,7 +781,9 @@ const views = {
 
 /* ---------- render ---------- */
 let tab = (location.hash || '').slice(1);
+let pingT = 0;
 function render() {
+  clearTimeout(pingT); pingT = setTimeout(() => { try { pingSeen(); } catch {} }, 3000);
   if (!['me', 'now', 'prog', 'teams', 'rota'].includes(tab)) tab = state.me ? 'me' : 'now';
   document.querySelectorAll('.tabbar a').forEach((a) => { const on = a.dataset.tab === tab; a.classList.toggle('active', on); a.setAttribute('aria-current', on ? 'page' : 'false'); });
   const view = $('#view');
@@ -1123,7 +1137,7 @@ async function checkVersion(force) {
 }
 setTimeout(() => checkVersion(true), 2500);
 setInterval(() => { if (document.visibilityState === 'visible') checkVersion(false); }, 60000);
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkVersion(false); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { checkVersion(false); setTimeout(() => { try { pingSeen(); } catch {} }, 2000); } });
 const bootAt = Date.now();
 if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', (ev) => {
   if (!ev.data || ev.data.type !== 'mp-updated') return;
