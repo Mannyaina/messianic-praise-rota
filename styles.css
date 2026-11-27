@@ -363,3 +363,4 @@ table.rota{border-collapse:separate;border-spacing:0;min-width:980px;width:100%;
 #splash.quick .sp-beams,#splash.quick .sp-ring,#splash.quick .sp-sparks,#splash.quick .sp-text,#splash.quick .sp-skip,#splash.quick .sp-shine{display:none}
 #splash.quick .sp-logo-wrap{animation:logoQuick .45s cubic-bezier(.2,.9,.3,1.2) forwards}
 @keyframes logoQuick{from{opacity:0;transform:scale(.85) rotate(-25deg)}to{opacity:1;transform:none}}
+.p-lead{font-size:12.5px;color:var(--muted);margin-top:2px;font-weight:500}

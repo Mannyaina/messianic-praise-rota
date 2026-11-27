@@ -522,7 +522,7 @@ function openMark(m) {
 const PROG = (() => {
   const P = window.MP_PROGRAMME; if (!P) return null;
   const flat = [];
-  P.sections.forEach((sec, si) => sec.items.forEach(([tm, title, dur, kind]) => flat.push({ si, title, dur, kind, start: onEvent(parseTime(tm)) })));
+  P.sections.forEach((sec, si) => sec.items.forEach(([tm, title, dur, kind, lead]) => flat.push({ si, title, dur, kind, lead: lead || '', start: onEvent(parseTime(tm)) })));
   flat.forEach((it, i) => { const nx = flat[i + 1]; it.end = nx && nx.start > it.start ? nx.start : new Date(+it.start + Math.max(it.dur, 1) * 60000); });
   return { draft: P.draft, sections: P.sections, items: flat };
 })();
@@ -704,7 +704,7 @@ const views = {
         if (sl && sl !== lastSlot) { lastSlot = sl; div = `<div class="p-shift">Media ${esc(sl.label)} · ${range(sl.start, sl.end)} · Head ${esc(sl.headDisplay || 'TBC')}</div>`; }
         return div + `<div class="p-row ${it.kind} p-${st}"${st === 'now' ? ' id="pnow"' : ''}>
           <div class="p-time">${hm(it.start)}</div>
-          <div class="p-body"><div class="p-title">${esc(it.title)}</div>${st === 'now' ? `<div class="p-live"><span class="live-dot"></span>On stage now · ends ${hm(it.end)}</div>` : ''}</div>
+          <div class="p-body"><div class="p-title">${esc(it.title)}</div>${it.lead ? `<div class="p-lead">${esc(it.lead)}</div>` : ''}${st === 'now' ? `<div class="p-live"><span class="live-dot"></span>On stage now · ends ${hm(it.end)}</div>` : ''}</div>
           <div class="p-dur">${it.dur ? it.dur + 'm' : ''}</div></div>`;
       }).join('');
       return `<div class="section-title"><span class="kicker">${esc(sec.title)}</span><span class="kicker">${esc(sec.note || '')}</span></div><div class="p-list">${rows}</div>`;
