@@ -1,8 +1,8 @@
 // Lock-screen alerts for leaders (OneSignal) — must be first
 try { importScripts('https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.sw.js'); } catch (e) {}
 // Offline support: keep the app shell on the phone; rota data always comes fresh from the sheet
-const VERSION = 'mp-rota-trialpath-v26';
-const SHELL = ['./', 'index.html', 'styles.css?v=26', 'config.js?v=26', 'programme.js?v=26', 'app.js?v=26', 'logo.webp', 'logo-sm.webp', 'manifest.webmanifest',
+const VERSION = 'mp-rota-trialpath-v27';
+const SHELL = ['./', 'index.html', 'styles.css?v=27', 'config.js?v=27', 'programme.js?v=27', 'app.js?v=27', 'logo.webp', 'logo-sm.webp', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/favicon.png'];
 
 self.addEventListener('install', (e) => {

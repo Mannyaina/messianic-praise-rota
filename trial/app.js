@@ -79,7 +79,7 @@ function buildModel(rows, source) {
   const hdr = find(/^set[\s-]?up$/i);
   if (!hdr) throw new Error('Could not find the "Set-Up" heading in the sheet');
   const startL = find(/^start$/i), endL = find(/^end$/i);
-  const minL = find(/minister/i), headL = find(/head/i, /team/i);
+  const minL = find(/minister/i), headL = find(/head/i, /team/i), coordL = find(/co-?ordinat/i);
 
   const hr = hdr.r;
   const width = Math.max(...rows.map((r) => r.length));
@@ -104,7 +104,7 @@ function buildModel(rows, source) {
     return {
       id: 's' + i, i, label, c0, span: c1 - c0 + 1, cols,
       start: onEvent(s0 ?? 0), end: onEvent(e1 ?? 0),
-      minister: minL ? firstIn(minL.r, c0, c1) : '', head: headL ? firstIn(headL.r, c0, c1) : '',
+      minister: minL ? firstIn(minL.r, c0, c1) : '', coord: coordL ? firstIn(coordL.r, c0, c1) : '', head: headL ? firstIn(headL.r, c0, c1) : '',
       ministerRow: minL ? minL.r : -1, headRow: headL ? headL.r : -1
     };
   });
@@ -146,7 +146,7 @@ function buildModel(rows, source) {
   const people = new Map();
   const add = (n, why) => splitNames(n).forEach((p) => { if (/^both$/i.test(p)) return; const k = key(p); if (!people.has(k)) people.set(k, { name: p, roles: new Set() }); people.get(k).roles.add(why); });
   teams.forEach((t) => t.roles.forEach((ro) => Object.values(ro.cells).forEach((cell) => cell.segs.forEach((sg) => add(sg.name, t.name)))));
-  slots.forEach((s) => { add(s.minister, 'Minister in charge'); add(s.headDisplay, 'Department head'); });
+  slots.forEach((s) => { add(s.minister, 'Minister in charge'); add(s.headDisplay, 'Department head'); add(s.coord, 'MP Media Coordinator'); });
 
   return { slots, teams, people: [...people.values()].sort((a, b) => a.name.localeCompare(b.name)), source, editable: !!C.SCRIPT_URL || source === 'demo' };
 }
@@ -241,6 +241,7 @@ function myAssignments() {
   for (const s of m.slots) {
     if (isMe(s.minister)) out.push({ slot: s, team: 'Minister in charge', role: 'Leader', from: s.start, to: s.end });
     if (isMe(s.headDisplay)) out.push({ slot: s, team: 'Department head', role: 'Leader', from: s.start, to: s.end });
+    if (isMe(s.coord)) out.push({ slot: s, team: 'MP Media Coordinator', role: 'Leader', from: s.start, to: s.end });
   }
   // one entry per shift + team, even when someone covers several roles (e.g. Cam 1–6 at Set-Up)
   const merged = [];
@@ -627,7 +628,7 @@ const views = {
         <div class="card people">
           ${next.teamObj && leadCell ? `<div class="row"><span>${esc(next.team)} · ${esc(leadCell ? leadCell.role : 'Lead')}</span><span>${esc(leadCell && next.roles.includes(leadCell.role) ? 'You' : leadNames || 'TBC')}</span></div>` : ''}
           ${mates.length ? `<div class="row"><span>With you</span><span>${esc(mates.slice(0, 4).join(', ') + (mates.length > 4 ? ` and ${mates.length - 4} more` : ''))}</span></div>` : ''}
-          <div class="row"><span>Department head</span><span>${esc(s.headDisplay || 'TBC')}</span></div>
+          <div class="row"><span>Department head</span><span>${esc(s.headDisplay || 'TBC')}</span></div>${s.coord ? `<div class="row"><span>MP Media Coordinator</span><span>${esc(s.coord)}</span></div>` : ''}
           <div class="row"><span>Minister in charge</span><span>${esc(s.minister || 'TBC')}</span></div>
         </div>`;
     } else {
@@ -660,7 +661,7 @@ const views = {
       return `<div class="kicker">Countdown to ${esc(first.label)}</div>
         <div class="slot-title"><div class="h-display">${first.start.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}</div><div class="t">${hm(first.start)}</div></div>
         <div class="countdown"><div><b>${d}</b><span>days</span></div><div><b>${h}</b><span>hrs</span></div><div><b>${mi}</b><span>mins</span></div></div>
-        <div class="card next-card"><b>${esc(C.VENUE)}</b> · Minister in charge: ${esc(first.minister || 'TBC')} · Heads: ${esc(first.headDisplay || 'TBC')}</div>
+        <div class="card next-card"><b>${esc(C.VENUE)}</b> · Minister in charge: ${esc(first.minister || 'TBC')} · Heads: ${esc(first.headDisplay || 'TBC')}${first.coord ? ' · MP Media Coordinator: ' + esc(first.coord) : ''}</div>
         <div class="section-title"><span class="kicker">First up · ${esc(first.label)} ${range(first.start, first.end)}</span></div>${roster(first, false)}${legend}`;
     }
     if (t >= lastEnd) {
@@ -679,7 +680,7 @@ const views = {
         <div class="slot-title"><div class="h-display">${esc(s.label)}</div><div class="t">${range(s.start, s.end)}</div></div>
         <div class="progress" role="progressbar" aria-valuenow="${Math.round(pct)}" aria-valuemin="0" aria-valuemax="100"><div style="width:${pct}%"></div></div>
         <div style="margin-top:6px;font-size:13px;color:var(--muted)">${after ? `Handover to ${esc(after.label)} in ${dur(s.end - t)}` : `Ends in ${dur(s.end - t)}`}</div>
-        <div class="duo"><div class="card"><small>Department head</small><b>${esc(s.headDisplay || 'TBC')}</b></div><div class="card"><small>Minister in charge</small><b>${esc(s.minister || 'TBC')}</b></div></div>
+        <div class="duo"><div class="card"><small>Department head</small><b>${esc(s.headDisplay || 'TBC')}</b></div><div class="card"><small>Minister in charge</small><b>${esc(s.minister || 'TBC')}</b></div>${s.coord ? `<div class="card" style="grid-column:1/-1"><small>MP Media Coordinator</small><b>${esc(s.coord)}</b></div>` : ''}</div>
         ${SIGNIN_ON() ? boardHTML(s, t) : ''}
         <div class="section-title"><span class="kicker">On duty by team</span><span class="kicker">Lead · Main · Backup</span></div>
         ${roster(s, true)}`;
@@ -745,7 +746,7 @@ const views = {
       const mTxt = state.editing ? `<button type="button" data-edit='${mRef}'>${esc(s.minister || 'Set minister')}</button>` : esc(s.minister || 'TBC');
       const hTxt = state.editing ? `<button type="button" data-edit='${hRef}'>${esc(s.head || 'Set head')}</button>` : esc(s.headDisplay || 'TBC');
       return `<th class="${st === 'now' ? 'now' : ''}" scope="col"><div class="sl">${esc(s.label)}</div><div class="tm">${range(s.start, s.end)}</div>
-        <div class="hd">Head: ${hTxt}</div><div class="hd">Minister: ${mTxt}</div></th>`;
+        <div class="hd">Head: ${hTxt}</div><div class="hd">Minister: ${mTxt}</div>${s.coord ? `<div class="hd">MP Media Coordinator: ${esc(s.coord)}</div>` : ''}</th>`;
     }).join('');
     const body = m.teams.map((tm) => `<tr><td class="team" scope="row">${esc(tm.name)}</td>${m.slots.map((s) => `<td class="${slotState(s, t) === 'now' ? 'now' : ''}"><div class="stack">${
       teamChips(tm, s, null)}</div></td>`).join('')}</tr>`).join('');
@@ -764,7 +765,7 @@ const views = {
         <div class="rt-head card ${st === 'now' ? 'now' : ''}">
           <div><div class="rt-slot">${esc(sel.label)}</div><div class="rt-time">${range(sel.start, sel.end)}${st === 'now' ? ' · <b style="color:var(--live)">ON NOW</b>' : st === 'done' ? ' · finished' : ''}</div></div>
           <div class="rt-meta"><div>Head: ${state.editing ? `<button type="button" class="linkish" data-edit='${hRef}'>${esc(sel.head || 'Set head')}</button>` : `<b>${esc(sel.headDisplay || 'TBC')}</b>`}</div>
-          <div>Minister: ${state.editing ? `<button type="button" class="linkish" data-edit='${mRef}'>${esc(sel.minister || 'Set minister')}</button>` : `<b>${esc(sel.minister || 'TBC')}</b>`}</div></div>
+          <div>Minister: ${state.editing ? `<button type="button" class="linkish" data-edit='${mRef}'>${esc(sel.minister || 'Set minister')}</button>` : `<b>${esc(sel.minister || 'TBC')}</b>`}</div>${sel.coord ? `<div>MP Media Coordinator: <b>${esc(sel.coord)}</b></div>` : ''}</div>
         </div>
         <div class="rt-list">${teams}</div>`;
     }
